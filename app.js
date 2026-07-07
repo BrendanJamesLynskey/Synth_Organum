@@ -52,6 +52,21 @@ function setVoices(count) {
     engine.setVoices(count);
 }
 
+const ENGINE_BLURBS = {
+    fof: 'FOF — overlapping formant grains, one burst per glottal pulse (IRCAM CHANT).',
+    formant: 'Formant filter — a glottal-pulse oscillator through parallel resonant band-pass formants (source–filter).',
+    additive: 'Additive — a sum of harmonics whose amplitudes trace the vowel formant envelope (spectral).',
+    tract: 'Vocal tract — a Kelly–Lochbaum digital waveguide of the vocal tract, excited by a glottal pulse (physical model).'
+};
+
+function setEngine(id) {
+    document.querySelectorAll('.engine-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector(`.engine-btn[data-engine="${id}"]`).classList.add('active');
+    const blurb = document.getElementById('engineBlurb');
+    if (blurb) blurb.textContent = ENGINE_BLURBS[id] || '';
+    engine.setTechnique(id);
+}
+
 function updateTenor() { engine.setTenorVolume(document.getElementById('tenorVol').value / 100); }
 function updateUpper() { engine.setUpperVolume(document.getElementById('upperVol').value / 100); }
 function updateReverb() { engine.setReverbMix(document.getElementById('reverbMix').value / 100); }

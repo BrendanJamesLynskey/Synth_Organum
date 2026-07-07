@@ -61,7 +61,8 @@ Open <http://localhost:8080> and press **Begin Organum**. Any static file server
 | `index.html` | Landing page — detects device, links to desktop or mobile |
 | `desktop.html` | Desktop web app |
 | `style.css` | Stained-glass-themed styles (lapis blue, gold leading) |
-| `organum-engine.js` | Pythagorean-tuned FOF vocal-synthesis engine (Web Audio API) |
+| `vocal-voices.js` | Library of interchangeable vocal-synthesis engines (FOF, formant, additive, vocal-tract) |
+| `organum-engine.js` | Pythagorean-tuned polyphony engine driving `vocal-voices.js` (Web Audio API) |
 | `app.js` | UI controller, rose-window visualizer, floating motes |
 | `organum_mobile.html` | Self-contained mobile version (single file) |
 
@@ -70,6 +71,7 @@ Open <http://localhost:8080> and press **Begin Organum**. Any static file server
 | Control | Description |
 |---|---|
 | **Mode** | One of the 8 church tones (Dorian → Hypomixolydian) — sets the finalis and reciting tenor |
+| **Vocal Engine** | Switch the vocal-synthesis technique live: **FOF** (CHANT grains) · **Formant** (source–filter) · **Additive** (spectral) · **Vocal tract** (Kelly–Lochbaum physical model) — all from [`vocal-voices.js`](vocal-voices.js) |
 | **Rhythmic Mode** | One of the 6 medieval rhythmic modes (long–short patterns) the upper voices follow |
 | **Tenor** | Volume of the sustained cantus-firmus voice |
 | **Upper Voices** | Volume of the florid melismatic voices |

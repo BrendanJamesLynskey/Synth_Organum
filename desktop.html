@@ -16,7 +16,7 @@
     <header>
         <div class="cross-ornament">&#x2626;</div>
         <h1>Synth Organum</h1>
-        <p class="subtitle">Notre-Dame Polyphony &#8226; FOF Vocal Synthesis &#8226; Pythagorean Tuning</p>
+        <p class="subtitle">Notre-Dame Polyphony &#8226; Selectable Vocal Synthesis &#8226; Pythagorean Tuning</p>
         <div class="cross-ornament">&#x2626;</div>
     </header>
 
@@ -109,6 +109,18 @@
                 </div>
             </div>
 
+            <!-- Vocal synthesis technique — switch the way the voice is made, live -->
+            <div class="control-group">
+                <label class="control-label">&#x2726; Vocal Engine</label>
+                <div class="mode-selector">
+                    <button class="engine-btn active" data-engine="fof" onclick="setEngine('fof')">FOF<small>CHANT grains</small></button>
+                    <button class="engine-btn" data-engine="formant" onclick="setEngine('formant')">Formant<small>source&ndash;filter</small></button>
+                    <button class="engine-btn" data-engine="additive" onclick="setEngine('additive')">Additive<small>spectral</small></button>
+                    <button class="engine-btn" data-engine="tract" onclick="setEngine('tract')">Tract<small>Kelly&ndash;Lochbaum</small></button>
+                </div>
+                <p class="engine-blurb" id="engineBlurb">FOF — overlapping formant grains, one burst per glottal pulse (IRCAM CHANT).</p>
+            </div>
+
             <div class="ornament-line"><span class="ornament-dot"></span><span class="ornament-rule"></span><span class="ornament-cross">&#x2626;</span><span class="ornament-rule"></span><span class="ornament-dot"></span></div>
         </div>
 
@@ -146,6 +158,7 @@
         <p class="latin">All the ends of the earth have seen</p>
     </footer>
 
+    <script src="vocal-voices.js"></script>
     <script src="organum-engine.js"></script>
     <script src="app.js"></script>
 </body>
