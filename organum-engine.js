@@ -1,24 +1,25 @@
 /**
- * Notre-Dame Organum Synthesis Engine — Additive Synthesis in Pythagorean Just Intonation
+ * Notre-Dame Organum Synthesis Engine — Vocal Polyphony in Pythagorean Just Intonation
  *
  * This engine recreates the sound of the Notre-Dame school (Léonin & Pérotin,
- * c. 1160–1250): the first great flowering of Western polyphony.
+ * c. 1160–1250): the first great flowering of Western polyphony. Organum was
+ * SUNG — unaccompanied voices ringing in the stone vault of the cathedral — so
+ * every voice here is a synthesized human voice, not an instrument.
  *
+ *   - VOICE    : source–filter (formant) vocal synthesis. A glottal-pulse source
+ *                (a `PeriodicWave` rolling off ~12 dB/oct, like flow through the
+ *                vocal folds) is shaped by a bank of parallel resonant formant
+ *                band-pass filters that give each singer a Latin vowel (a o u e).
+ *                The tenor sings a dark "oo/oh"; the upper voices open to "ah/eh".
  *   - TUNING   : every pitch is built from PURE PYTHAGOREAN ratios — stacked
  *                3:2 fifths reduced into the octave (1/1, 9/8, 81/64, 4/3, 3/2,
  *                27/16, 243/128, 2/1), NOT equal temperament. The perfect
- *                consonances (octave 2/1, fifth 3/2, fourth 4/3, twelfth 3/1)
- *                are therefore beatless — voices lock and ring. That locking is
- *                the signature sound of medieval polyphony.
- *   - TIMBRE   : each voice is ADDITIVE — a custom `PeriodicWave` built from an
- *                explicit partial-amplitude recipe (an organ/vocal hybrid). The
- *                tenor is dark and rounded; the upper voices are brighter. Two
- *                or three pure-plus-detuned copies per voice add shimmer while
- *                the fundamental stays exactly in tune so the consonances hold.
+ *                consonances between voices (octave 2/1, twelfth 3/1, double-
+ *                octave 4/1) are therefore beatless — the voices lock and ring.
  *   - TEXTURE  : a TENOR (vox principalis) holds very long sustained notes from
  *                a plainchant cantus firmus, while florid melismatic upper voices
- *                (duplum · triplum · quadruplum) move faster above it and cadence
- *                onto perfect consonances — the Pérotin "organum purum" texture.
+ *                (duplum · triplum · quadruplum) flower above it and cadence onto
+ *                perfect consonances — the Pérotin "organum purum" texture.
  *
  * On top of that: the 8 medieval church tones (finalis / reciting tenor), the
  * 6 rhythmic modes (repeating long–short patterns the upper voices follow), and
@@ -48,8 +49,9 @@ class OrganumEngine {
         this.dryGain = null;
         this.convolver = null;
         this.analyser = null;
+        this.glottalWave = null;
 
-        // Low, grounded pitch of scale-degree 0 (a dark tenor register).
+        // Low, grounded pitch of scale-degree 0 (a dark tenor register, C3).
         this.basePitch = 130.81;
 
         // === Pure Pythagorean diatonic ratios (degrees 0..6; octave = ×2) ===
@@ -57,8 +59,6 @@ class OrganumEngine {
         this.ratios = [1/1, 9/8, 81/64, 4/3, 3/2, 27/16, 243/128];
 
         // === The 8 medieval church tones ===
-        // finalis: scale-degree the mode is founded on (its modal colour);
-        // tenor:   reciting degree above the finalis; up: melismatic ceiling.
         this.modes = {
             1: { name: "Dorian",        finalis: 1, tenor: 4, up: 8 },
             2: { name: "Hypodorian",    finalis: 1, tenor: 2, up: 6 },
@@ -72,17 +72,22 @@ class OrganumEngine {
 
         // === The 6 rhythmic modes: repeating long–short duration patterns ===
         this.rhythmPatterns = {
-            1: [2, 1],       // Mode I   — trochaic (long–short)
-            2: [1, 2],       // Mode II  — iambic (short–long)
-            3: [3, 1, 2],    // Mode III — dactylic
-            4: [1, 2, 3],    // Mode IV  — anapestic
-            5: [3, 3],       // Mode V   — spondaic (all longs)
-            6: [1, 1, 1]     // Mode VI  — all breves
+            1: [2, 1], 2: [1, 2], 3: [3, 1, 2], 4: [1, 2, 3], 5: [3, 3], 6: [1, 1, 1]
         };
 
-        // Cadence consonances above the tenor, per upper voice (pure ratios).
-        //   duplum → octave, triplum → fifth-above-octave (twelfth), quadruplum → double octave.
+        // Cadence consonances above the tenor, per upper voice (pure ratios):
+        //   duplum → octave (2), triplum → twelfth (3), quadruplum → double octave (4).
         this.cadenceRatios = [2, 3, 4];
+
+        // === Sung-vowel formant tables (F1..F4 centre frequencies, Hz) ===
+        this.vowels = {
+            a: [700, 1220, 2600, 3300],
+            e: [530, 1840, 2480, 3300],
+            o: [430,  820, 2700, 3300],
+            u: [350,  600, 2700, 3300]
+        };
+        // Each voice sings its own vowel; the tenor is darkest, upper voices open.
+        this.voiceVowels = ['o', 'a', 'e', 'a'];
 
         this.cantus = [];
         this.cantusPos = 0;
@@ -93,7 +98,7 @@ class OrganumEngine {
         this.ctx = new (window.AudioContext || window.webkitAudioContext)();
 
         this.masterGain = this.ctx.createGain();
-        this.masterGain.gain.value = 0.8;
+        this.masterGain.gain.value = 0.9;
         this.masterGain.connect(this.ctx.destination);
 
         this.analyser = this.ctx.createAnalyser();
@@ -121,24 +126,20 @@ class OrganumEngine {
         this.dryGain.connect(this.masterGain);
         this.convolver.connect(this.reverbGain);
         this.reverbGain.connect(this.masterGain);
+
+        this.buildGlottalWave();
     }
 
     /**
-     * Build one voice's timbre by ADDITIVE synthesis: an explicit partial recipe
-     * turned into a PeriodicWave. Tenor = dark/rounded (fast roll-off, organ-like
-     * octave & twelfth reinforcement); upper voices = brighter (richer partials).
+     * The glottal source: harmonics rolling off ~ -11 dB/oct. Rich enough that the
+     * upper formants have partials to resonate, giving a full choral tone.
      */
-    buildVoiceWave(role) {
-        const partials = role === 'tenor'
-            // fundamental strong; gentle 2nd & 3rd (open-flute organ warmth); little high end
-            ? [1.0, 0.55, 0.42, 0.16, 0.11, 0.07, 0.05, 0.03, 0.02, 0.015, 0.01]
-            // brighter principal: more upper partials for a ringing melismatic voice
-            : [1.0, 0.62, 0.52, 0.4, 0.3, 0.24, 0.18, 0.14, 0.1, 0.075, 0.055, 0.04, 0.03, 0.022];
-        const n = partials.length + 1;
+    buildGlottalWave() {
+        const n = 48;
         const real = new Float32Array(n);
         const imag = new Float32Array(n);
-        for (let k = 1; k < n; k++) imag[k] = partials[k - 1];
-        return this.ctx.createPeriodicWave(real, imag, { disableNormalization: false });
+        for (let k = 1; k < n; k++) imag[k] = 1 / Math.pow(k, 1.1);
+        this.glottalWave = this.ctx.createPeriodicWave(real, imag, { disableNormalization: false });
     }
 
     /** Great cathedral — a very long ~7 s convolution tail with sparse reflections. */
@@ -151,7 +152,6 @@ class OrganumEngine {
             const data = impulse.getChannelData(ch);
             for (let i = 0; i < length; i++) {
                 const t = i / sr;
-                // three overlapping decays give the long, blooming stone-vault tail
                 const env = Math.exp(-t * 0.5) * 0.32 + Math.exp(-t * 0.22) * 0.4 + Math.exp(-t * 0.1) * 0.28;
                 data[i] = (Math.random() * 2 - 1) * env;
                 if (i < sr * 0.3) {
@@ -173,30 +173,56 @@ class OrganumEngine {
     }
 
     /**
-     * Build one persistent voice: its own additive PeriodicWave, a small set of
-     * pure-plus-detuned copies for shimmer, and a gain that fades in gracefully.
+     * Build one persistent SINGER: a vocal tract of four parallel formant band-pass
+     * filters (tuned to this voice's vowel) fed from a source gain. Note oscillators
+     * (the vocal folds) connect transiently into sourceGain; the tract persists.
+     *
+     *   sourceGain → [4 formant band-pass → formant gain] → voiceGain → bus
      */
     createVoice(index, total) {
         const now = this.ctx.currentTime;
         const role = index === 0 ? 'tenor' : 'upper';
         const bus = role === 'tenor' ? this.tenorBus : this.upperBus;
 
+        const sourceGain = this.ctx.createGain();
+        sourceGain.gain.value = 1.0;
+
         const voiceGain = this.ctx.createGain();
-        // Additive: more voices = fuller, gently tapered so the mix never clips.
-        const perVoice = role === 'tenor' ? 0.6 : [0.34, 0.3, 0.26][Math.min(index - 1, 2)];
+        const perVoice = role === 'tenor' ? 0.85 : [0.6, 0.5, 0.44][Math.min(index - 1, 2)];
         voiceGain.gain.setValueAtTime(0, now);
         voiceGain.gain.linearRampToValueAtTime(perVoice, now + 1.4 + index * 0.5);
         voiceGain.connect(bus);
 
-        // One exactly-pure copy (detune 0 — keeps consonances beatless) plus
-        // slightly detuned neighbours for a rich, shimmering organum sonority.
-        const detunes = role === 'tenor' ? [0, -4, 4] : [0, -6, 6];
+        // Four parallel formant resonators for this voice's vowel.
+        const vowel = this.voiceVowels[Math.min(index, this.voiceVowels.length - 1)];
+        const centres = this.vowels[vowel];
+        const formantGainsRel = [1.0, 0.5, 0.28, 0.16];
+        const bandwidths = [80, 90, 120, 150];
+        const formants = [];
+        for (let f = 0; f < 4; f++) {
+            const bp = this.ctx.createBiquadFilter();
+            bp.type = 'bandpass';
+            bp.frequency.value = centres[f];
+            bp.Q.value = centres[f] / bandwidths[f];
+            const fg = this.ctx.createGain();
+            fg.gain.value = formantGainsRel[f];
+            sourceGain.connect(bp);
+            bp.connect(fg);
+            fg.connect(voiceGain);
+            formants.push({ bp, fg, bandwidth: bandwidths[f] });
+        }
 
-        return {
-            role, index, voiceGain,
-            wave: this.buildVoiceWave(role),
-            detunes
-        };
+        // A touch of the raw source bleeds through so consonants/edge stay audible.
+        const bleed = this.ctx.createGain();
+        bleed.gain.value = 0.12;
+        sourceGain.connect(bleed);
+        bleed.connect(voiceGain);
+
+        // Two folds per note (a hair of detune) make each singer fuller; the pure
+        // fundamental still dominates so inter-voice consonances stay beatless.
+        const detunes = role === 'tenor' ? [0, 5] : [0, 7];
+
+        return { role, index, sourceGain, voiceGain, formants, vowel, detunes };
     }
 
     setupVoices() {
@@ -220,12 +246,7 @@ class OrganumEngine {
 
     // === Composition ===
 
-    /**
-     * A slow plainchant cantus firmus for the tenor: rise from the finalis to
-     * the reciting tone, hold and ornament there, then descend home. Degrees are
-     * relative to the mode's finalis; lengths are in beats (very long — the tenor
-     * sustains while the melisma flowers above).
-     */
+    /** A slow plainchant cantus firmus for the tenor (degrees relative to finalis). */
     buildCantus() {
         const m = this.modes[this.currentMode];
         const t = m.tenor;
@@ -257,17 +278,13 @@ class OrganumEngine {
                 n.gain.gain.cancelScheduledValues(now);
                 n.gain.gain.setValueAtTime(n.gain.gain.value, now);
                 n.gain.gain.linearRampToValueAtTime(0, now + 1.4);
-                setTimeout(() => { try { n.osc.stop(); } catch (e) {} }, 1700);
+                setTimeout(() => { try { n.oscs.forEach(o => o.stop()); } catch (e) {} }, 1700);
             } catch (e) {}
         }
         this.activeNotes = [];
         this.teardownVoices();
     }
 
-    /**
-     * Sound one cantus-firmus note on the tenor and flower a melisma above it in
-     * every upper voice, ending each melisma on its perfect-consonance cadence.
-     */
     scheduleTenorNote() {
         if (!this.isPlaying || !this.voices.length) return;
         const m = this.modes[this.currentMode];
@@ -277,7 +294,7 @@ class OrganumEngine {
         const tenorDeg = m.finalis + item.deg;
         const tenorFreq = this.degToFreq(tenorDeg);
 
-        // Tenor: one long, dark, sustained note (vox principalis).
+        // Tenor: one long, dark, sustained "oo/oh" (vox principalis).
         if (this.voices[0]) this.playVoiceNote(this.voices[0], tenorFreq, dur, 0, { sustained: true });
 
         // Upper voices: florid melismas cadencing onto perfect consonances.
@@ -291,19 +308,12 @@ class OrganumEngine {
         this.cantusTimeout = setTimeout(() => this.scheduleTenorNote(), dur * 1000);
     }
 
-    /**
-     * One upper voice's melisma over a held tenor note: a florid stepwise line in
-     * the rhythmic-mode pattern that lands, on its final note, on an exact pure
-     * consonance above the tenor (tenorFreq × 2, ×3 or ×4 — a beatless lock).
-     */
     scheduleMelisma(voice, vi, tenorDeg, tenorFreq, dur, beat) {
         const pattern = this.rhythmPatterns[this.rhythmicMode];
-        const unit = beat * 0.5;                        // the "breve" pulse
+        const unit = beat * 0.5;
         const cadenceRatio = this.cadenceRatios[Math.min(vi - 1, this.cadenceRatios.length - 1)];
-        const centerOffset = cadenceRatio >= 4 ? 14 : cadenceRatio >= 3 ? 11 : 7;  // deg above tenor
+        const centerOffset = cadenceRatio >= 4 ? 14 : cadenceRatio >= 3 ? 11 : 7;
 
-        // Tile the rhythmic pattern across the tenor's duration (phase-shifted per
-        // voice so the parts interweave rather than lock rigidly).
         const segs = [];
         let tpos = 0, k = vi;
         while (tpos < dur - unit * 0.4) {
@@ -314,9 +324,8 @@ class OrganumEngine {
         }
         if (!segs.length) segs.push({ start: 0, dur });
 
-        // Florid melodic contour: wander by diatonic step around the cadence
-        // region; the very last note is the exact pure consonance.
         let cur = centerOffset;
+        let lastFreq = null;
         segs.forEach((seg, i) => {
             let freq;
             if (i === segs.length - 1) {
@@ -328,45 +337,43 @@ class OrganumEngine {
                 if (cur < centerOffset - 2) cur = centerOffset - 1;
                 freq = this.degToFreq(tenorDeg + cur);
             }
-            const slideFrom = i > 0 ? this._lastMelismaFreq : null;
-            this.playVoiceNote(voice, freq, seg.dur, seg.start, { slideFrom });
-            this._lastMelismaFreq = freq;
+            this.playVoiceNote(voice, freq, seg.dur, seg.start, { slideFrom: i > 0 ? lastFreq : null });
+            lastFreq = freq;
         });
     }
 
     /**
-     * Play one note on a voice: several pure-plus-detuned additive copies through
-     * a shared amplitude envelope into the voice's gain. Long tenor notes bloom
-     * with slow vibrato; the melisma glides legato between pitches.
+     * Sing one note on a voice: glottal-pulse fold oscillator(s) through a per-note
+     * amplitude envelope into the singer's formant tract (voice.sourceGain). Long
+     * tenor notes bloom with slow vibrato; melisma notes glide legato.
      */
     playVoiceNote(voice, freq, duration, delay, opts = {}) {
         if (!isFinite(freq) || freq <= 0) return;
         const t0 = this.ctx.currentTime + (delay || 0);
 
         const gain = this.ctx.createGain();
-        const attack = opts.sustained ? Math.min(0.45, duration * 0.25) : Math.min(0.06, duration * 0.4);
-        const release = opts.sustained ? Math.max(0.6, duration * 0.35) : Math.max(0.12, duration * 0.5);
-        const peak = opts.sustained ? 0.9 : 0.7;
+        const attack = opts.sustained ? Math.min(0.5, duration * 0.25) : Math.min(0.09, duration * 0.4);
+        const release = opts.sustained ? Math.max(0.7, duration * 0.4) : Math.max(0.18, duration * 0.55);
+        const peak = opts.sustained ? 0.85 : 0.7;
         gain.gain.setValueAtTime(0.0001, t0);
         gain.gain.linearRampToValueAtTime(peak, t0 + attack);
-        gain.gain.setValueAtTime(peak * 0.95, t0 + Math.max(attack, duration * 0.6));
+        gain.gain.setValueAtTime(peak * 0.92, t0 + Math.max(attack, duration * 0.6));
         gain.gain.exponentialRampToValueAtTime(0.0008, t0 + duration + release);
-        gain.connect(voice.voiceGain);
+        gain.connect(voice.sourceGain);
 
         const oscs = [];
         voice.detunes.forEach((cents, di) => {
             const osc = this.ctx.createOscillator();
-            osc.setPeriodicWave(voice.wave);
-            osc.detune.value = cents;                    // copy 0 is exactly pure
+            osc.setPeriodicWave(this.glottalWave);
+            osc.detune.value = cents + (Math.random() - 0.5) * 4;   // tiny human jitter
             if (opts.slideFrom && isFinite(opts.slideFrom)) {
                 osc.frequency.setValueAtTime(opts.slideFrom, t0);
-                osc.frequency.exponentialRampToValueAtTime(freq, t0 + Math.min(0.1, duration * 0.35));
+                osc.frequency.exponentialRampToValueAtTime(freq, t0 + Math.min(0.12, duration * 0.4));
             } else {
                 osc.frequency.setValueAtTime(freq, t0);
             }
-            // Detuned copies sit quieter so the pure fundamental dominates tuning.
             const copyGain = this.ctx.createGain();
-            copyGain.gain.value = di === 0 ? 1.0 : 0.5;
+            copyGain.gain.value = di === 0 ? 1.0 : 0.55;
             osc.connect(copyGain);
             copyGain.connect(gain);
             osc.start(t0);
@@ -374,19 +381,19 @@ class OrganumEngine {
             oscs.push(osc);
         });
 
-        // Slow vibrato blooms on the long held tenor notes only.
-        if (opts.sustained && duration > 1.2) {
+        // Slow vibrato blooms on the long held notes (choral, not operatic).
+        if (duration > 1.0) {
             const vib = this.ctx.createOscillator();
             vib.type = 'sine';
-            vib.frequency.value = 4.4 + Math.random() * 0.8;
+            vib.frequency.value = 4.6 + Math.random() * 0.9;
             const vibDepth = this.ctx.createGain();
-            vibDepth.gain.value = freq * 0.004;
+            vibDepth.gain.value = freq * (opts.sustained ? 0.005 : 0.006);
             vib.connect(vibDepth);
             oscs.forEach(o => vibDepth.connect(o.frequency));
             vib.start(t0 + attack); vib.stop(t0 + duration + release);
         }
 
-        const node = { osc: oscs[0], oscs, gain };
+        const node = { oscs, gain };
         this.activeNotes.push(node);
         setTimeout(() => {
             const idx = this.activeNotes.indexOf(node);

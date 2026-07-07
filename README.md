@@ -1,6 +1,6 @@
 # Synth Organum — Notre-Dame Polyphony Synthesizer
 
-A web-based synthesizer that sings **Notre-Dame organum** in real time in the browser. No samples, no libraries — the polyphony is built from scratch with **additive synthesis in pure Pythagorean just intonation** using only the Web Audio API.
+A web-based synthesizer that sings **Notre-Dame organum** in real time in the browser. No samples, no libraries — organum was *sung*, so every voice is a synthesized human voice: **source–filter (formant) vocal synthesis in pure Pythagorean just intonation**, using only the Web Audio API.
 
 **[Launch the app](https://brendanjameslynskey.github.io/Synth_Organum/)** — auto-detects your device and recommends desktop or mobile.
 
@@ -17,7 +17,7 @@ The two great masters were **Léonin**, of the two-voice *organum purum*, and **
 Rather than equal-tempered tones, the engine builds every pitch and timbre from first principles:
 
 - **Tuning** — pure **Pythagorean just intonation**: pitches are stacked 3:2 fifths reduced into the octave (`1/1, 9/8, 81/64, 4/3, 3/2, 27/16, 243/128, 2/1`). The octave (2/1), fifth (3/2), fourth (4/3) and twelfth (3/1) are *exact*, so the consonances at every cadence are **beatless** — the voices lock and the stone rings.
-- **Timbre** — **additive synthesis**: each voice is a custom `PeriodicWave` built from an explicit partial-amplitude recipe (an organ/vocal hybrid). The tenor is dark and rounded; the upper voices are brighter. Two or three copies per voice — one exactly pure, the others slightly detuned — add shimmer without disturbing the tuning.
+- **Voice** — **source–filter (formant) vocal synthesis**: each singer is a glottal-pulse `PeriodicWave` source (harmonics rolling off ~11 dB/oct, like the vocal folds) shaped by a bank of four parallel resonant **formant** band-pass filters that give the voice a Latin vowel. The tenor sings a dark "oo/oh"; the upper voices open to "ah/eh". Two folds per note with a hair of detune and human jitter make each voice full and living, while the pure fundamentals keep the inter-voice consonances beatless.
 - **Texture** — a sustained **tenor cantus firmus** beneath **florid melismatic upper voices** (duplum · triplum · quadruplum) that move faster above it and cadence onto perfect consonances (fifth, octave, twelfth, double octave), stacking the open Pérotin sonority.
 - **Rhythm** — the upper voices follow one of the six **rhythmic modes**.
 - **Space** — a very long **great-cathedral convolution reverb** (~7 s tail) with sparse early reflections.
@@ -39,7 +39,7 @@ A parallel, secular, vernacular branch runs alongside it: **Troubadour** song �
 | App | Style | Synthesis technique |
 |---|---|---|
 | [Synth Gregorian](https://github.com/BrendanJamesLynskey/Synth_Gregorian) | Plainsong | Source–filter formant vocal synthesis |
-| **Synth Organum** (this) | Notre-Dame polyphony | Additive synthesis in Pythagorean just intonation |
+| **Synth Organum** (this) | Notre-Dame polyphony | Formant vocal polyphony in Pythagorean just intonation |
 | [Synth Ars Nova](https://github.com/BrendanJamesLynskey/Synth_ArsNova) | 14th-c. isorhythm | FM synthesis |
 | [Synth Troubadour](https://github.com/BrendanJamesLynskey/Synth_Troubadour) | Secular monophony | Subtractive synthesis |
 | [Synth Estampie](https://github.com/BrendanJamesLynskey/Synth_Estampie) | Medieval dance | Physical modelling |
@@ -61,7 +61,7 @@ Open <http://localhost:8080> and press **Begin Organum**. Any static file server
 | `index.html` | Landing page — detects device, links to desktop or mobile |
 | `desktop.html` | Desktop web app |
 | `style.css` | Stained-glass-themed styles (lapis blue, gold leading) |
-| `organum-engine.js` | Pythagorean additive polyphony engine (Web Audio API) |
+| `organum-engine.js` | Pythagorean-tuned formant vocal polyphony engine (Web Audio API) |
 | `app.js` | UI controller, rose-window visualizer, floating motes |
 | `organum_mobile.html` | Self-contained mobile version (single file) |
 
