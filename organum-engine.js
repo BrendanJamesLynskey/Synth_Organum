@@ -1,30 +1,106 @@
 /**
- * Notre-Dame Organum Synthesis Engine — Vocal Polyphony in Pythagorean Just Intonation
+ * Notre-Dame Organum Synthesis Engine — FOF (Formant-Wave-Function) Vocal Synthesis
+ *                                        in Pythagorean Just Intonation
  *
- * This engine recreates the sound of the Notre-Dame school (Léonin & Pérotin,
- * c. 1160–1250): the first great flowering of Western polyphony. Organum was
- * SUNG — unaccompanied voices ringing in the stone vault of the cathedral — so
- * every voice here is a synthesized human voice, not an instrument.
+ * Organum was SUNG. To get genuinely vocal — not "filtered-synth" — tone, this
+ * engine uses FOF synthesis (fonction d'onde formantique), the IRCAM CHANT
+ * technique behind the classic realistic synthetic-choir sounds.
  *
- *   - VOICE    : source–filter (formant) vocal synthesis. A glottal-pulse source
- *                (a `PeriodicWave` rolling off ~12 dB/oct, like flow through the
- *                vocal folds) is shaped by a bank of parallel resonant formant
- *                band-pass filters that give each singer a Latin vowel (a o u e).
- *                The tenor sings a dark "oo/oh"; the upper voices open to "ah/eh".
- *   - TUNING   : every pitch is built from PURE PYTHAGOREAN ratios — stacked
- *                3:2 fifths reduced into the octave (1/1, 9/8, 81/64, 4/3, 3/2,
- *                27/16, 243/128, 2/1), NOT equal temperament. The perfect
- *                consonances between voices (octave 2/1, twelfth 3/1, double-
- *                octave 4/1) are therefore beatless — the voices lock and ring.
- *   - TEXTURE  : a TENOR (vox principalis) holds very long sustained notes from
- *                a plainchant cantus firmus, while florid melismatic upper voices
- *                (duplum · triplum · quadruplum) flower above it and cadence onto
- *                perfect consonances — the Pérotin "organum purum" texture.
+ *   - FOF VOICE : the voice is NOT an oscillator run through a filter. Instead,
+ *                 once per glottal period a burst of damped formant "grains" is
+ *                 fired — each formant is a sine at its centre frequency, wrapped
+ *                 in an excitation envelope whose decay sets the formant bandwidth.
+ *                 Overlapping these grains at the fundamental rate reconstructs a
+ *                 true vocal spectrum with real formant peaks and a natural,
+ *                 breathy, human timbre. This runs sample-accurately in an
+ *                 AudioWorklet (`fof-voice`), loaded from an inline Blob so the
+ *                 app stays self-contained. Each sung part is a small chorus of
+ *                 detuned FOF singers with independent vibrato and pitch jitter.
+ *   - TUNING    : every pitch is a pure PYTHAGOREAN ratio — stacked 3:2 fifths
+ *                 reduced into the octave — so the octaves/fifths/twelfths at each
+ *                 cadence are beatless and the voices lock and ring.
+ *   - TEXTURE   : a dark sustained TENOR (cantus firmus) beneath florid melismatic
+ *                 upper voices (duplum · triplum · quadruplum) cadencing onto
+ *                 perfect consonances — the Pérotin "organum purum" texture.
  *
- * On top of that: the 8 medieval church tones (finalis / reciting tenor), the
- * 6 rhythmic modes (repeating long–short patterns the upper voices follow), and
- * a very long great-cathedral convolution reverb.
+ * Plus the 8 church tones, the 6 rhythmic modes, and a ~7 s cathedral reverb.
  */
+
+// ── FOF AudioWorklet processor (runs on the audio thread) ─────────────────────
+const FOF_WORKLET_SRC = `
+class FofVoiceProcessor extends AudioWorkletProcessor {
+    static get parameterDescriptors() {
+        return [
+            { name: 'frequency', defaultValue: 130, minValue: 20, maxValue: 3000, automationRate: 'a-rate' },
+            { name: 'level',     defaultValue: 0,   minValue: 0,  maxValue: 2,    automationRate: 'a-rate' }
+        ];
+    }
+    constructor(options) {
+        super();
+        const o = (options && options.processorOptions) || {};
+        this.sr = sampleRate;
+        this.phase = 0;
+        this.grains = [];                       // active glottal pulses (age in samples)
+        this.formants = o.formants || [{f:600,a:1,bw:90},{f:1000,a:0.4,bw:100},{f:2500,a:0.2,bw:120},{f:2900,a:0.16,bw:130}];
+        this.tex = o.tex || 0.004;              // excitation attack skirt (s)
+        this.breath = (o.breath != null) ? o.breath : 0.06;
+        this.jitter = (o.jitter != null) ? o.jitter : 0.03;
+        this.vibRate = 4.4 + Math.random() * 1.4;
+        this.vibDepth = (o.vibDepth != null) ? o.vibDepth : 0.006;
+        this.vibPhase = Math.random() * 6.283;
+        this.pruneAge = Math.floor(0.06 * this.sr);
+        this.maxGrains = 24;
+        this.port.onmessage = (e) => {
+            if (e.data.formants) this.formants = e.data.formants;
+            if (e.data.breath != null) this.breath = e.data.breath;
+        };
+    }
+    process(inputs, outputs, params) {
+        const out = outputs[0][0];
+        if (!out) return true;
+        const fArr = params.frequency, lArr = params.level;
+        const n = out.length, TAU = 6.283185307179586;
+        for (let i = 0; i < n; i++) {
+            const level = lArr.length > 1 ? lArr[i] : lArr[0];
+            let f0 = fArr.length > 1 ? fArr[i] : fArr[0];
+            // gentle vibrato
+            this.vibPhase += TAU * this.vibRate / this.sr;
+            if (this.vibPhase > TAU) this.vibPhase -= TAU;
+            f0 *= 1 + Math.sin(this.vibPhase) * this.vibDepth;
+
+            // spawn a new glottal pulse each fundamental period
+            this.phase += f0 / this.sr;
+            if (this.phase >= 1) {
+                this.phase -= 1;
+                if (level > 0.0002 || this.grains.length) {
+                    this.grains.push({ age: 0, amp: 1 + (Math.random() - 0.5) * this.jitter });
+                    while (this.grains.length && this.grains[0].age > this.pruneAge) this.grains.shift();
+                    if (this.grains.length > this.maxGrains) this.grains.shift();
+                }
+            }
+
+            let s = 0;
+            const F = this.formants, tex = this.tex;
+            for (let g = 0; g < this.grains.length; g++) {
+                const gr = this.grains[g];
+                const t = gr.age / this.sr;
+                let atk = 1;
+                if (t < tex) atk = 0.5 * (1 - Math.cos(Math.PI * t / tex));
+                for (let k = 0; k < F.length; k++) {
+                    const fm = F[k];
+                    const env = atk * Math.exp(-Math.PI * fm.bw * t);
+                    if (env > 1e-4) s += gr.amp * fm.a * env * Math.sin(TAU * fm.f * t);
+                }
+                gr.age++;
+            }
+            if (this.breath > 0) s += (Math.random() * 2 - 1) * this.breath * (0.4 + 0.6 * Math.min(1, this.grains.length / 3));
+            out[i] = s * level * 0.22;
+        }
+        return true;
+    }
+}
+registerProcessor('fof-voice', FofVoiceProcessor);
+`;
 
 class OrganumEngine {
     constructor() {
@@ -32,33 +108,28 @@ class OrganumEngine {
         this.isPlaying = false;
         this.currentMode = 1;
         this.rhythmicMode = 1;
-        this.numVoices = 2;             // 2 duplum · 3 triplum · 4 quadruplum
-        this.tempo = 46;                // pace of the melisma (beats/min-ish)
-        this.tenorVolume = 0.85;        // vox principalis / cantus firmus
-        this.upperVolume = 0.7;         // florid upper voices
+        this.numVoices = 2;
+        this.tempo = 46;
+        this.tenorVolume = 0.85;
+        this.upperVolume = 0.7;
         this.reverbMix = 0.62;
 
-        this.voices = [];               // persistent voice objects (0 = tenor)
+        this.voices = [];
         this.cantusTimeout = null;
-        this.activeNotes = [];
+        this.hasFOF = false;
 
         this.masterGain = null;
+        this.limiter = null;
         this.tenorBus = null;
         this.upperBus = null;
         this.reverbGain = null;
         this.dryGain = null;
         this.convolver = null;
         this.analyser = null;
-        this.glottalWave = null;
 
-        // Low, grounded pitch of scale-degree 0 (a dark tenor register, C3).
-        this.basePitch = 130.81;
-
-        // === Pure Pythagorean diatonic ratios (degrees 0..6; octave = ×2) ===
-        // Stacked 3:2 fifths reduced into one octave.
+        this.basePitch = 130.81;                       // C3
         this.ratios = [1/1, 9/8, 81/64, 4/3, 3/2, 27/16, 243/128];
 
-        // === The 8 medieval church tones ===
         this.modes = {
             1: { name: "Dorian",        finalis: 1, tenor: 4, up: 8 },
             2: { name: "Hypodorian",    finalis: 1, tenor: 2, up: 6 },
@@ -69,28 +140,24 @@ class OrganumEngine {
             7: { name: "Mixolydian",    finalis: 4, tenor: 4, up: 9 },
             8: { name: "Hypomixolydian",finalis: 4, tenor: 3, up: 7 }
         };
-
-        // === The 6 rhythmic modes: repeating long–short duration patterns ===
-        this.rhythmPatterns = {
-            1: [2, 1], 2: [1, 2], 3: [3, 1, 2], 4: [1, 2, 3], 5: [3, 3], 6: [1, 1, 1]
-        };
-
-        // Cadence consonances above the tenor, per upper voice (pure ratios):
-        //   duplum → octave (2), triplum → twelfth (3), quadruplum → double octave (4).
+        this.rhythmPatterns = { 1:[2,1], 2:[1,2], 3:[3,1,2], 4:[1,2,3], 5:[3,3], 6:[1,1,1] };
         this.cadenceRatios = [2, 3, 4];
 
-        // === Sung-vowel formant tables (F1..F4 centre frequencies, Hz) ===
+        // === Sung-vowel FOF formant tables: {f: Hz, a: amp, bw: kHz-ish decay} ===
+        // Bandwidths are in kHz for the FOF decay term (exp(-pi*bw*1000... )) — here
+        // expressed directly so exp(-pi*bw*t) with bw in Hz. Rounder F1-dominant
+        // balance keeps the tone vocal, not buzzy.
         this.vowels = {
-            a: [700, 1220, 2600, 3300],
-            e: [530, 1840, 2480, 3300],
-            o: [430,  820, 2700, 3300],
-            u: [350,  600, 2700, 3300]
+            a: [{f:650,a:1,bw:80},   {f:1080,a:0.5,bw:90},  {f:2650,a:0.26,bw:120}, {f:2900,a:0.18,bw:130}],
+            e: [{f:400,a:1,bw:70},   {f:1700,a:0.42,bw:100},{f:2500,a:0.3,bw:120},  {f:2900,a:0.2,bw:130}],
+            o: [{f:400,a:1,bw:70},   {f:760,a:0.34,bw:80},  {f:2550,a:0.2,bw:120},  {f:2850,a:0.14,bw:130}],
+            u: [{f:350,a:1,bw:65},   {f:600,a:0.26,bw:75},  {f:2400,a:0.16,bw:120}, {f:2800,a:0.1,bw:130}]
         };
-        // Each voice sings its own vowel; the tenor is darkest, upper voices open.
-        this.voiceVowels = ['o', 'a', 'e', 'a'];
+        this.voiceVowels = ['o', 'a', 'e', 'a'];       // tenor dark; upper voices open
 
         this.cantus = [];
         this.cantusPos = 0;
+        this._workletURL = null;
     }
 
     async init() {
@@ -99,12 +166,21 @@ class OrganumEngine {
 
         this.masterGain = this.ctx.createGain();
         this.masterGain.gain.value = 0.9;
-        this.masterGain.connect(this.ctx.destination);
+
+        // Soft limiter so overlapping grains never clip the vault.
+        this.limiter = this.ctx.createDynamicsCompressor();
+        this.limiter.threshold.value = -8;
+        this.limiter.knee.value = 8;
+        this.limiter.ratio.value = 6;
+        this.limiter.attack.value = 0.004;
+        this.limiter.release.value = 0.25;
+        this.masterGain.connect(this.limiter);
+        this.limiter.connect(this.ctx.destination);
 
         this.analyser = this.ctx.createAnalyser();
         this.analyser.fftSize = 2048;
         this.analyser.smoothingTimeConstant = 0.85;
-        this.masterGain.connect(this.analyser);
+        this.limiter.connect(this.analyser);
 
         await this.createReverb();
 
@@ -115,7 +191,6 @@ class OrganumEngine {
 
         this.dryGain = this.ctx.createGain();
         this.dryGain.gain.value = 1 - this.reverbMix * 0.5;
-
         this.reverbGain = this.ctx.createGain();
         this.reverbGain.gain.value = this.reverbMix;
 
@@ -127,22 +202,25 @@ class OrganumEngine {
         this.convolver.connect(this.reverbGain);
         this.reverbGain.connect(this.masterGain);
 
-        this.buildGlottalWave();
+        // Load the FOF worklet from an inline Blob (keeps the app self-contained).
+        try {
+            const blob = new Blob([FOF_WORKLET_SRC], { type: 'application/javascript' });
+            this._workletURL = URL.createObjectURL(blob);
+            await this.ctx.audioWorklet.addModule(this._workletURL);
+            this.hasFOF = true;
+        } catch (e) {
+            this.hasFOF = false;                       // fall back to source–filter
+            this.buildGlottalWave();
+        }
     }
 
-    /**
-     * The glottal source: harmonics rolling off ~ -11 dB/oct. Rich enough that the
-     * upper formants have partials to resonate, giving a full choral tone.
-     */
+    /** Fallback source (only used if AudioWorklet is unavailable). */
     buildGlottalWave() {
-        const n = 48;
-        const real = new Float32Array(n);
-        const imag = new Float32Array(n);
-        for (let k = 1; k < n; k++) imag[k] = 1 / Math.pow(k, 1.1);
+        const n = 40, real = new Float32Array(n), imag = new Float32Array(n);
+        for (let k = 1; k < n; k++) imag[k] = 1 / Math.pow(k, 1.3);
         this.glottalWave = this.ctx.createPeriodicWave(real, imag, { disableNormalization: false });
     }
 
-    /** Great cathedral — a very long ~7 s convolution tail with sparse reflections. */
     async createReverb() {
         const sr = this.ctx.sampleRate;
         const length = Math.floor(sr * 7);
@@ -165,7 +243,6 @@ class OrganumEngine {
         this.convolver.buffer = impulse;
     }
 
-    /** Absolute scale-degree → frequency, in pure Pythagorean intonation. */
     degToFreq(deg) {
         const idx = ((deg % 7) + 7) % 7;
         const oct = Math.floor(deg / 7);
@@ -173,63 +250,57 @@ class OrganumEngine {
     }
 
     /**
-     * Build one persistent SINGER: a vocal tract of four parallel formant band-pass
-     * filters (tuned to this voice's vowel) fed from a source gain. Note oscillators
-     * (the vocal folds) connect transiently into sourceGain; the tract persists.
-     *
-     *   sourceGain → [4 formant band-pass → formant gain] → voiceGain → bus
+     * Build one SUNG PART as a small chorus of detuned FOF singers sharing a
+     * note-envelope gain: [FOF ×3] → noteGain → voiceGain(persistent fade) → bus.
+     * The centre singer is exactly in tune so inter-voice consonances stay pure.
      */
     createVoice(index, total) {
         const now = this.ctx.currentTime;
         const role = index === 0 ? 'tenor' : 'upper';
         const bus = role === 'tenor' ? this.tenorBus : this.upperBus;
-
-        const sourceGain = this.ctx.createGain();
-        sourceGain.gain.value = 1.0;
+        const vowel = this.voiceVowels[Math.min(index, this.voiceVowels.length - 1)];
 
         const voiceGain = this.ctx.createGain();
-        const perVoice = role === 'tenor' ? 0.85 : [0.6, 0.5, 0.44][Math.min(index - 1, 2)];
+        const perVoice = role === 'tenor' ? 0.9 : [0.62, 0.52, 0.46][Math.min(index - 1, 2)];
         voiceGain.gain.setValueAtTime(0, now);
         voiceGain.gain.linearRampToValueAtTime(perVoice, now + 1.4 + index * 0.5);
         voiceGain.connect(bus);
 
-        // Four parallel formant resonators for this voice's vowel.
-        const vowel = this.voiceVowels[Math.min(index, this.voiceVowels.length - 1)];
-        const centres = this.vowels[vowel];
-        const formantGainsRel = [1.0, 0.5, 0.28, 0.16];
-        const bandwidths = [80, 90, 120, 150];
-        const formants = [];
-        for (let f = 0; f < 4; f++) {
-            const bp = this.ctx.createBiquadFilter();
-            bp.type = 'bandpass';
-            bp.frequency.value = centres[f];
-            bp.Q.value = centres[f] / bandwidths[f];
-            const fg = this.ctx.createGain();
-            fg.gain.value = formantGainsRel[f];
-            sourceGain.connect(bp);
-            bp.connect(fg);
-            fg.connect(voiceGain);
-            formants.push({ bp, fg, bandwidth: bandwidths[f] });
+        const noteGain = this.ctx.createGain();
+        noteGain.gain.value = 0.0001;
+        noteGain.connect(voiceGain);
+
+        const singers = [];               // {node|osc, detuneFactor, freqParam}
+        const detunes = role === 'tenor' ? [0, -6, 6] : [0, -8, 9];
+
+        if (this.hasFOF) {
+            const formants = this.vowels[vowel];
+            detunes.forEach((cents, di) => {
+                const node = new AudioWorkletNode(this.ctx, 'fof-voice', {
+                    numberOfInputs: 0, outputChannelCount: [1],
+                    processorOptions: {
+                        formants,
+                        breath: role === 'tenor' ? 0.05 : 0.07,
+                        jitter: 0.03 + di * 0.01,
+                        vibDepth: (role === 'tenor' ? 0.005 : 0.007) + di * 0.001,
+                        tex: 0.004
+                    }
+                });
+                const sg = this.ctx.createGain();
+                sg.gain.value = di === 0 ? 1.0 : 0.7;
+                node.connect(sg); sg.connect(noteGain);
+                singers.push({ node, freqParam: node.parameters.get('frequency'),
+                               levelParam: node.parameters.get('level'),
+                               detuneFactor: Math.pow(2, cents / 1200) });
+            });
         }
 
-        // A touch of the raw source bleeds through so consonants/edge stay audible.
-        const bleed = this.ctx.createGain();
-        bleed.gain.value = 0.12;
-        sourceGain.connect(bleed);
-        bleed.connect(voiceGain);
-
-        // Two folds per note (a hair of detune) make each singer fuller; the pure
-        // fundamental still dominates so inter-voice consonances stay beatless.
-        const detunes = role === 'tenor' ? [0, 5] : [0, 7];
-
-        return { role, index, sourceGain, voiceGain, formants, vowel, detunes };
+        return { role, index, vowel, voiceGain, noteGain, singers, detunes };
     }
 
     setupVoices() {
         this.teardownVoices();
-        for (let v = 0; v < this.numVoices; v++) {
-            this.voices.push(this.createVoice(v, this.numVoices));
-        }
+        for (let v = 0; v < this.numVoices; v++) this.voices.push(this.createVoice(v, this.numVoices));
     }
 
     teardownVoices() {
@@ -238,7 +309,10 @@ class OrganumEngine {
             try {
                 voice.voiceGain.gain.cancelScheduledValues(now);
                 voice.voiceGain.gain.setValueAtTime(voice.voiceGain.gain.value, now);
-                voice.voiceGain.gain.linearRampToValueAtTime(0, now + 2.5);
+                voice.voiceGain.gain.linearRampToValueAtTime(0, now + 2.2);
+                setTimeout(() => {
+                    try { voice.singers.forEach(s => { s.levelParam && s.levelParam.setValueAtTime(0, this.ctx.currentTime); s.node.disconnect(); }); } catch (e) {}
+                }, 2600);
             } catch (e) {}
         }
         this.voices = [];
@@ -246,20 +320,14 @@ class OrganumEngine {
 
     // === Composition ===
 
-    /** A slow plainchant cantus firmus for the tenor (degrees relative to finalis). */
     buildCantus() {
         const m = this.modes[this.currentMode];
         const t = m.tenor;
-        const c = [];
-        c.push({ deg: 0, len: 6 });
-        c.push({ deg: Math.max(1, Math.round(t / 2)), len: 5 });
-        c.push({ deg: t, len: 7 });
-        c.push({ deg: t - 1, len: 5 });
-        c.push({ deg: t, len: 6 });
-        c.push({ deg: Math.max(0, t - 2), len: 5 });
-        c.push({ deg: 1, len: 5 });
-        c.push({ deg: 0, len: 8 });
-        this.cantus = c;
+        this.cantus = [
+            { deg: 0, len: 6 }, { deg: Math.max(1, Math.round(t / 2)), len: 5 }, { deg: t, len: 7 },
+            { deg: t - 1, len: 5 }, { deg: t, len: 6 }, { deg: Math.max(0, t - 2), len: 5 },
+            { deg: 1, len: 5 }, { deg: 0, len: 8 }
+        ];
         this.cantusPos = 0;
     }
 
@@ -272,16 +340,6 @@ class OrganumEngine {
     stop() {
         this.isPlaying = false;
         if (this.cantusTimeout) { clearTimeout(this.cantusTimeout); this.cantusTimeout = null; }
-        const now = this.ctx ? this.ctx.currentTime : 0;
-        for (const n of this.activeNotes) {
-            try {
-                n.gain.gain.cancelScheduledValues(now);
-                n.gain.gain.setValueAtTime(n.gain.gain.value, now);
-                n.gain.gain.linearRampToValueAtTime(0, now + 1.4);
-                setTimeout(() => { try { n.oscs.forEach(o => o.stop()); } catch (e) {} }, 1700);
-            } catch (e) {}
-        }
-        this.activeNotes = [];
         this.teardownVoices();
     }
 
@@ -294,17 +352,13 @@ class OrganumEngine {
         const tenorDeg = m.finalis + item.deg;
         const tenorFreq = this.degToFreq(tenorDeg);
 
-        // Tenor: one long, dark, sustained "oo/oh" (vox principalis).
         if (this.voices[0]) this.playVoiceNote(this.voices[0], tenorFreq, dur, 0, { sustained: true });
-
-        // Upper voices: florid melismas cadencing onto perfect consonances.
         for (let vi = 1; vi < this.voices.length; vi++) {
             this.scheduleMelisma(this.voices[vi], vi, tenorDeg, tenorFreq, dur, beat);
         }
 
         this.cantusPos++;
         if (this.cantusPos >= this.cantus.length) this.buildCantus();
-
         this.cantusTimeout = setTimeout(() => this.scheduleTenorNote(), dur * 1000);
     }
 
@@ -324,12 +378,11 @@ class OrganumEngine {
         }
         if (!segs.length) segs.push({ start: 0, dur });
 
-        let cur = centerOffset;
-        let lastFreq = null;
+        let cur = centerOffset, lastFreq = null;
         segs.forEach((seg, i) => {
             let freq;
             if (i === segs.length - 1) {
-                freq = tenorFreq * cadenceRatio;        // pure, beatless cadence
+                freq = tenorFreq * cadenceRatio;
             } else {
                 const step = [-2, -1, 1, 2, 1, -1][Math.floor(Math.random() * 6)];
                 cur += step;
@@ -337,68 +390,71 @@ class OrganumEngine {
                 if (cur < centerOffset - 2) cur = centerOffset - 1;
                 freq = this.degToFreq(tenorDeg + cur);
             }
-            this.playVoiceNote(voice, freq, seg.dur, seg.start, { slideFrom: i > 0 ? lastFreq : null });
+            this.playVoiceNote(voice, freq, seg.dur, seg.start, { slideFrom: i > 0 ? lastFreq : null, legato: i > 0 });
             lastFreq = freq;
         });
     }
 
     /**
-     * Sing one note on a voice: glottal-pulse fold oscillator(s) through a per-note
-     * amplitude envelope into the singer's formant tract (voice.sourceGain). Long
-     * tenor notes bloom with slow vibrato; melisma notes glide legato.
+     * Sing one note on a part: steer each FOF singer's frequency (pure centre +
+     * detuned neighbours) and re-shape the shared note-envelope. Melisma notes
+     * glide legato; the tenor swells slowly.
      */
     playVoiceNote(voice, freq, duration, delay, opts = {}) {
         if (!isFinite(freq) || freq <= 0) return;
         const t0 = this.ctx.currentTime + (delay || 0);
+        const attack = opts.sustained ? Math.min(0.55, duration * 0.3) : (opts.legato ? Math.min(0.08, duration * 0.4) : Math.min(0.12, duration * 0.4));
+        const release = opts.sustained ? Math.max(0.7, duration * 0.4) : Math.max(0.16, duration * 0.5);
+        const peak = opts.sustained ? 0.92 : 0.72;
 
-        const gain = this.ctx.createGain();
-        const attack = opts.sustained ? Math.min(0.5, duration * 0.25) : Math.min(0.09, duration * 0.4);
-        const release = opts.sustained ? Math.max(0.7, duration * 0.4) : Math.max(0.18, duration * 0.55);
-        const peak = opts.sustained ? 0.85 : 0.7;
-        gain.gain.setValueAtTime(0.0001, t0);
-        gain.gain.linearRampToValueAtTime(peak, t0 + attack);
-        gain.gain.setValueAtTime(peak * 0.92, t0 + Math.max(attack, duration * 0.6));
-        gain.gain.exponentialRampToValueAtTime(0.0008, t0 + duration + release);
-        gain.connect(voice.sourceGain);
+        const g = voice.noteGain.gain;
+        g.cancelScheduledValues(t0);
+        g.setValueAtTime(Math.max(0.0001, g.value), t0);
+        g.linearRampToValueAtTime(peak, t0 + attack);
+        g.setValueAtTime(peak * 0.92, t0 + Math.max(attack, duration * 0.62));
+        g.exponentialRampToValueAtTime(0.0008, t0 + duration + release);
 
-        const oscs = [];
+        if (this.hasFOF) {
+            voice.singers.forEach(s => {
+                const target = freq * s.detuneFactor;
+                if (opts.slideFrom && isFinite(opts.slideFrom)) {
+                    s.freqParam.cancelScheduledValues(t0);
+                    s.freqParam.setValueAtTime(opts.slideFrom * s.detuneFactor, t0);
+                    s.freqParam.exponentialRampToValueAtTime(target, t0 + Math.min(0.13, duration * 0.4));
+                } else {
+                    s.freqParam.cancelScheduledValues(t0);
+                    s.freqParam.setValueAtTime(target, t0);
+                }
+                s.levelParam.cancelScheduledValues(t0);
+                s.levelParam.setValueAtTime(1, t0);
+            });
+        } else {
+            this.playFallbackNote(voice, freq, duration, delay, opts, t0);
+        }
+    }
+
+    /** Minimal source–filter note if the worklet could not load. */
+    playFallbackNote(voice, freq, duration, delay, opts, t0) {
+        if (!voice._formant) {
+            const centres = this.vowels[voice.vowel];
+            voice._src = this.ctx.createGain();
+            voice._formant = centres.map((fm) => {
+                const bp = this.ctx.createBiquadFilter();
+                bp.type = 'bandpass'; bp.frequency.value = fm.f; bp.Q.value = fm.f / (fm.bw * 3);
+                const fg = this.ctx.createGain(); fg.gain.value = fm.a;
+                voice._src.connect(bp); bp.connect(fg); fg.connect(voice.noteGain);
+                return bp;
+            });
+        }
         voice.detunes.forEach((cents, di) => {
             const osc = this.ctx.createOscillator();
             osc.setPeriodicWave(this.glottalWave);
-            osc.detune.value = cents + (Math.random() - 0.5) * 4;   // tiny human jitter
-            if (opts.slideFrom && isFinite(opts.slideFrom)) {
-                osc.frequency.setValueAtTime(opts.slideFrom, t0);
-                osc.frequency.exponentialRampToValueAtTime(freq, t0 + Math.min(0.12, duration * 0.4));
-            } else {
-                osc.frequency.setValueAtTime(freq, t0);
-            }
-            const copyGain = this.ctx.createGain();
-            copyGain.gain.value = di === 0 ? 1.0 : 0.55;
-            osc.connect(copyGain);
-            copyGain.connect(gain);
-            osc.start(t0);
-            osc.stop(t0 + duration + release + 0.1);
-            oscs.push(osc);
+            osc.detune.value = cents;
+            osc.frequency.setValueAtTime(freq, t0);
+            const og = this.ctx.createGain(); og.gain.value = di === 0 ? 1 : 0.6;
+            osc.connect(og); og.connect(voice._src);
+            osc.start(t0); osc.stop(t0 + duration + 1.0);
         });
-
-        // Slow vibrato blooms on the long held notes (choral, not operatic).
-        if (duration > 1.0) {
-            const vib = this.ctx.createOscillator();
-            vib.type = 'sine';
-            vib.frequency.value = 4.6 + Math.random() * 0.9;
-            const vibDepth = this.ctx.createGain();
-            vibDepth.gain.value = freq * (opts.sustained ? 0.005 : 0.006);
-            vib.connect(vibDepth);
-            oscs.forEach(o => vibDepth.connect(o.frequency));
-            vib.start(t0 + attack); vib.stop(t0 + duration + release);
-        }
-
-        const node = { oscs, gain };
-        this.activeNotes.push(node);
-        setTimeout(() => {
-            const idx = this.activeNotes.indexOf(node);
-            if (idx > -1) this.activeNotes.splice(idx, 1);
-        }, (duration + release + 0.3 + (delay || 0)) * 1000);
     }
 
     // === Public transport / control ===
@@ -412,28 +468,18 @@ class OrganumEngine {
 
     end() { this.stop(); }
 
-    setMode(mode) {
-        this.currentMode = mode;
-        if (this.isPlaying) this.buildCantus();
-    }
-
+    setMode(mode) { this.currentMode = mode; if (this.isPlaying) this.buildCantus(); }
     setRhythm(mode) { this.rhythmicMode = mode; }
-
-    setVoices(count) {
-        this.numVoices = count;
-        if (this.voices.length) this.setupVoices();
-    }
+    setVoices(count) { this.numVoices = count; if (this.voices.length) this.setupVoices(); }
 
     setTenorVolume(v) {
         this.tenorVolume = v;
         if (this.tenorBus) this.tenorBus.gain.linearRampToValueAtTime(v, this.ctx.currentTime + 0.2);
     }
-
     setUpperVolume(v) {
         this.upperVolume = v;
         if (this.upperBus) this.upperBus.gain.linearRampToValueAtTime(v, this.ctx.currentTime + 0.2);
     }
-
     setReverbMix(v) {
         this.reverbMix = v;
         if (this.reverbGain && this.dryGain) {
@@ -442,7 +488,6 @@ class OrganumEngine {
             this.dryGain.gain.linearRampToValueAtTime(1 - v * 0.5, now + 0.2);
         }
     }
-
     setTempo(bpm) { this.tempo = bpm; }
 
     getAnalyserData() {
