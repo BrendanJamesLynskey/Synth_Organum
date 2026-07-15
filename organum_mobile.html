@@ -1062,8 +1062,8 @@ class OrganumEngine {
         this.isPlaying = false;
         this.currentMode = 1;
         this.rhythmicMode = 1;
-        this.numVoices = 2;
-        this.tempo = 46;
+        this.numVoices = 3;             // tenor + duplum + triplum (the Pérotin sound)
+        this.tempo = 88;                // perfections (dotted-quarter beats) per minute
         this.technique = 'sampler';   // real recorded voices (was 'fof')
         this.tenorVolume = 0.85;
         this.upperVolume = 0.7;
@@ -1081,7 +1081,8 @@ class OrganumEngine {
         this.convolver = null;
         this.analyser = null;
 
-        this.basePitch = 130.81;                       // C3
+        this.basePitch = 174.61;                       // F3 — final of the Viderunt (mode 5)
+        // Pythagorean F-mode scale degrees: F(0) G(1) A(2) B♭(3) C(4) D(5) E(6)
         this.ratios = [1/1, 9/8, 81/64, 4/3, 3/2, 27/16, 243/128];
 
         this.modes = {
@@ -1181,7 +1182,7 @@ class OrganumEngine {
         const detunes = role === 'tenor' ? [0, -6, 6] : [0, -8, 9];
         const singers = detunes.map((cents, di) => {
             const voice = VocalVoices.create(this.ctx, {
-                technique: this.technique, voice: 'auto', ensemble: 1,  // app already layers 3 detuned singers
+                technique: this.technique, voice: 'male', ensemble: 1,  // narrow male band; app layers 3 detuned singers
                 vowel, detuneCents: cents,
                 breath: role === 'tenor' ? 0.05 : 0.07,
                 vibDepth: (role === 'tenor' ? 0.005 : 0.007) + di * 0.001
@@ -1217,12 +1218,22 @@ class OrganumEngine {
     // === Composition ===
 
     buildCantus() {
-        const m = this.modes[this.currentMode];
-        const t = m.tenor;
+        // The REAL tenor of the "Viderunt omnes" gradual (F-mode; the chant Pérotin set),
+        // as scale degrees  F=0 G=1 A=2 B♭=3 C=4 D=5 E=6.  A long held note = *organum
+        // purum* (the tenor is an unmeasured drone under a florid upper melisma); a run of
+        // short notes = a *discant clausula* (the tenor itself moves in measured mode 5).
+        // `perf` = number of perfections (the ternary long-short beat) the tenor note lasts.
         this.cantus = [
-            { deg: 0, len: 6 }, { deg: Math.max(1, Math.round(t / 2)), len: 5 }, { deg: t, len: 7 },
-            { deg: t - 1, len: 5 }, { deg: t, len: 6 }, { deg: Math.max(0, t - 2), len: 5 },
-            { deg: 1, len: 5 }, { deg: 0, len: 8 }
+            { deg: 0, perf: 20, style: 'purum' },   // "Vi—"  the famous immense opening F
+            { deg: 0, perf: 12, style: 'purum' },   // "de—"
+            { deg: 2, perf: 16, style: 'purum' },   // "runt"  A
+            { deg: 4, perf: 16, style: 'purum' },   //         C
+            // discant clausula on the following melisma — the tenor gears into measured motion
+            { deg: 4, perf: 2, style: 'discant' }, { deg: 5, perf: 2, style: 'discant' },
+            { deg: 4, perf: 2, style: 'discant' }, { deg: 2, perf: 2, style: 'discant' },
+            { deg: 4, perf: 2, style: 'discant' }, { deg: 6, perf: 2, style: 'discant' },
+            { deg: 5, perf: 2, style: 'discant' }, { deg: 4, perf: 3, style: 'discant' },
+            { deg: 0, perf: 22, style: 'purum' }    // return to F — the vast closing open-fifth
         ];
         this.cantusPos = 0;
     }
@@ -1237,51 +1248,63 @@ class OrganumEngine {
 
     scheduleTenorNote() {
         if (!this.isPlaying || !this.voices.length) return;
-        const m = this.modes[this.currentMode];
         const item = this.cantus[this.cantusPos];
-        const beat = 60 / this.tempo;
-        const dur = beat * item.len;
-        const tenorDeg = m.finalis + item.deg;
+        const perfDur = 60 / this.tempo;                 // one perfection (dotted-quarter beat)
+        const dur = item.perf * perfDur;
+        const tenorDeg = item.deg;                        // Viderunt tenor, F-mode
         const tenorFreq = this.degToFreq(tenorDeg);
 
-        if (this.voices[0]) this.playVoiceNote(this.voices[0], tenorFreq, dur, 0, { sustained: true });
-        for (let vi = 1; vi < this.voices.length; vi++) this.scheduleMelisma(this.voices[vi], vi, tenorDeg, tenorFreq, dur, beat);
+        // The tenor: a huge sustained drone (purum) or a measured note (discant).
+        if (this.voices[0]) this.playVoiceNote(this.voices[0], tenorFreq, dur, 0, { sustained: item.style === 'purum' });
 
-        this.cantusPos++;
-        if (this.cantusPos >= this.cantus.length) this.buildCantus();
+        // Florid upper voice(s) run over the tenor note in modal rhythm.
+        for (let vi = 1; vi < this.voices.length; vi++) {
+            const notes = this.genUpper(tenorDeg, vi, dur, perfDur, item.style);
+            notes.forEach(nn => this.playVoiceNote(this.voices[vi], this.degToFreq(nn.deg), nn.dur, nn.start,
+                { slideFrom: nn.legato ? this.degToFreq(nn.prev) : null, legato: nn.legato }));
+        }
+
+        this.cantusPos = (this.cantusPos + 1) % this.cantus.length;
         this.cantusTimeout = setTimeout(() => this.scheduleTenorNote(), dur * 1000);
     }
 
-    scheduleMelisma(voice, vi, tenorDeg, tenorFreq, dur, beat) {
-        const pattern = this.rhythmPatterns[this.rhythmicMode];
-        const unit = beat * 0.5;
-        const cadenceRatio = this.cadenceRatios[Math.min(vi - 1, this.cadenceRatios.length - 1)];
-        const centerOffset = cadenceRatio >= 4 ? 14 : cadenceRatio >= 3 ? 11 : 7;
+    /**
+     * Generate one upper voice's melisma over a single tenor note. Authentic Notre-Dame
+     * traits: rhythmic mode 1 (LONG–breve trochaic swing) with occasional mode-6 runs,
+     * short ordo cells punctuated by rests (breathing every 2–4 perfections), the line
+     * circling stepwise around the perfect consonances above the tenor (unison/4th/5th/
+     * octave), and CADENCING onto an open 5th/octave before the tenor moves. Returns a
+     * list of { deg, start, dur, prev, legato } (deg = absolute scale degree).
+     */
+    genUpper(tenorDeg, vi, dur, perfDur, style) {
+        const stable = [0, 3, 4, 7];                     // unison, 4th, 5th, octave above the tenor
+        const topDeg = 9;                                // never above ~A4 → stays in the male band
+        const lo = 0, hi = Math.max(2, topDeg - tenorDeg);
+        const clamp = (x) => Math.max(lo, Math.min(hi, x));
+        const nearestStable = (x) => { let b = stable[0], bd = 99; for (const s of stable) if (s <= hi && Math.abs(s - x) < bd) { bd = Math.abs(s - x); b = s; } return b; };
 
-        const segs = [];
-        let tpos = 0, k = vi;
-        while (tpos < dur - unit * 0.4) {
-            let nd = pattern[k % pattern.length] * unit;
-            if (tpos + nd > dur) nd = dur - tpos;
-            segs.push({ start: tpos, dur: nd });
-            tpos += nd; k++;
-        }
-        if (!segs.length) segs.push({ start: 0, dur });
+        const notes = [];
+        let t = 0, cur = clamp(4 + (vi - 1) * 2), prev = cur, perfCount = 0;   // higher voice starts higher
+        const push = (rel, ndur) => { notes.push({ deg: tenorDeg + rel, start: t, dur: ndur, prev: tenorDeg + prev, legato: notes.length > 0 }); prev = rel; t += ndur; };
 
-        let cur = centerOffset, lastFreq = null;
-        segs.forEach((seg, i) => {
-            let freq;
-            if (i === segs.length - 1) freq = tenorFreq * cadenceRatio;
-            else {
-                const step = [-2, -1, 1, 2, 1, -1][Math.floor(Math.random() * 6)];
-                cur += step;
-                if (cur > centerOffset + 3) cur = centerOffset + 2;
-                if (cur < centerOffset - 2) cur = centerOffset - 1;
-                freq = this.degToFreq(tenorDeg + cur);
+        while (t < dur - perfDur * 0.55) {
+            // cadence: the last perfection lands on a perfect consonance (open sonority)
+            if (dur - t <= perfDur * 1.25) { const cad = Math.min(hi, (vi === 1 ? 7 : 4)); push(cad, dur - t); break; }
+            // ordo: breathe (short rest) every 2–4 perfections
+            if (perfCount > 0 && (perfCount % (2 + (perfCount % 3)) === 0)) t += perfDur * 0.45;
+            if (t >= dur - perfDur * 0.55) break;
+            if (style === 'purum' && perfCount % 4 === 3) {
+                // mode 6 flourish — three running breves
+                for (let b = 0; b < 3 && t < dur - perfDur * 0.4; b++) push(clamp(cur + [-1, 1, -1][b]), perfDur / 3), cur = prev;
+            } else {
+                // mode 1 — LONG on a stable consonance, breve passing tone
+                cur = clamp(nearestStable(cur)); push(cur, perfDur * 2 / 3);
+                cur = clamp(cur + (Math.random() < 0.5 ? 1 : -1)); push(cur, perfDur / 3);
             }
-            this.playVoiceNote(voice, freq, seg.dur, seg.start, { slideFrom: i > 0 ? lastFreq : null, legato: i > 0 });
-            lastFreq = freq;
-        });
+            perfCount++;
+        }
+        if (!notes.length) push(Math.min(hi, vi === 1 ? 7 : 4), dur);
+        return notes;
     }
 
     /** Steer each singer's pitch and re-shape the shared note-envelope. */
@@ -1351,6 +1374,7 @@ class OrganumEngine {
  */
 
 const engine = new OrganumEngine();
+if (typeof window !== "undefined") window.engine = engine;
 let animationId = null;
 let isChanting = false;
 
