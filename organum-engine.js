@@ -31,7 +31,7 @@ class OrganumEngine {
         this.rhythmicMode = 1;
         this.numVoices = 2;
         this.tempo = 46;
-        this.technique = 'fof';
+        this.technique = 'sampler';   // real recorded voices (was 'fof')
         this.tenorVolume = 0.85;
         this.upperVolume = 0.7;
         this.reverbMix = 0.62;
@@ -148,7 +148,8 @@ class OrganumEngine {
         const detunes = role === 'tenor' ? [0, -6, 6] : [0, -8, 9];
         const singers = detunes.map((cents, di) => {
             const voice = VocalVoices.create(this.ctx, {
-                technique: this.technique, vowel, detuneCents: cents,
+                technique: this.technique, voice: 'auto', ensemble: 1,  // app already layers 3 detuned singers
+                vowel, detuneCents: cents,
                 breath: role === 'tenor' ? 0.05 : 0.07,
                 vibDepth: (role === 'tenor' ? 0.005 : 0.007) + di * 0.001
             });
@@ -288,7 +289,7 @@ class OrganumEngine {
     setRhythm(mode) { this.rhythmicMode = mode; }
     setVoices(count) { this.numVoices = count; if (this.voices.length) this.setupVoices(); }
 
-    /** Switch the vocal-synthesis technique live ('fof'|'formant'|'additive'|'tract'). */
+    /** Switch the vocal-synthesis technique live ('vocoder'|'formant'|'klatt'|'tract'|'lpc'|'fof'|'additive'|'ddsp'). */
     setTechnique(t) {
         this.technique = t;
         if (this.voices.length) this.setupVoices();

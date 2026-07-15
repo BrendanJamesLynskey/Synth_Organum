@@ -1,6 +1,8 @@
 # Synth Organum — Notre-Dame Polyphony Synthesizer
 
-A web-based synthesizer that sings **Notre-Dame organum** in real time in the browser. No samples, no libraries — organum was *sung*, so every voice is a synthesized human voice made with **FOF (formant-wave-function) synthesis** — the IRCAM *CHANT* technique behind realistic synthetic singing — tuned in pure **Pythagorean just intonation**, using only the Web Audio API (an `AudioWorklet`).
+A web-based synthesizer that sings **Notre-Dame organum** in real time in the browser. Organum was *sung*, so every voice is now a **real recorded human voice**: the shared [`vocal-voices.js`](vocal-voices.js) library plays actual sung vowels from the [**VocalSet**](https://zenodo.org/records/1193957) corpus (CC BY 4.0), pitch-mapped with **formant-preserving** TD-PSOLA and tuned in pure **Pythagorean just intonation**. (The earlier pure-synthesis engines, including FOF/*CHANT*, remain selectable.)
+
+> **Credit:** sampled voices derived from [**VocalSet**](https://zenodo.org/records/1193957) (Wilkins, Seetharaman, Wahl & Pardo, ISMIR 2018), CC BY 4.0.
 
 **[Launch the app](https://brendanjameslynskey.github.io/Synth_Organum/)** — auto-detects your device and recommends desktop or mobile.
 
@@ -61,7 +63,7 @@ Open <http://localhost:8080> and press **Begin Organum**. Any static file server
 | `index.html` | Landing page — detects device, links to desktop or mobile |
 | `desktop.html` | Desktop web app |
 | `style.css` | Stained-glass-themed styles (lapis blue, gold leading) |
-| `vocal-voices.js` | Library of interchangeable vocal-synthesis engines (FOF, formant, additive, vocal-tract) |
+| `vocal-voices.js` | Library of 8 interchangeable vocal-synthesis engines (vocoder, formant, Klatt, vocal-tract, LPC, FOF, additive, DDSP) |
 | `organum-engine.js` | Pythagorean-tuned polyphony engine driving `vocal-voices.js` (Web Audio API) |
 | `app.js` | UI controller, rose-window visualizer, floating motes |
 | `organum_mobile.html` | Self-contained mobile version (single file) |
@@ -71,7 +73,7 @@ Open <http://localhost:8080> and press **Begin Organum**. Any static file server
 | Control | Description |
 |---|---|
 | **Mode** | One of the 8 church tones (Dorian → Hypomixolydian) — sets the finalis and reciting tenor |
-| **Vocal Engine** | Switch the vocal-synthesis technique live: **FOF** (CHANT grains) · **Formant** (source–filter) · **Additive** (spectral) · **Vocal tract** (Kelly–Lochbaum physical model) — all from [`vocal-voices.js`](vocal-voices.js) |
+| **Vocal Engine** | Switch the vocal-synthesis technique live, walking the history of the sung machine: **Vocoder** (Dudley VODER, 1939) · **Formant** (source–filter) · **Klatt** (cascade, 1980) · **Vocal tract** (Kelly–Lochbaum physical model) · **LPC** (all-pole, 1978) · **FOF** (CHANT grains, 1979) · **Additive** (spectral / SMS) · **DDSP** (harmonic+noise, 2020) — all from [`vocal-voices.js`](vocal-voices.js) |
 | **Rhythmic Mode** | One of the 6 medieval rhythmic modes (long–short patterns) the upper voices follow |
 | **Tenor** | Volume of the sustained cantus-firmus voice |
 | **Upper Voices** | Volume of the florid melismatic voices |
