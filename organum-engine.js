@@ -29,6 +29,11 @@
  *                             Pérotin's tripla/quadrupla.
  *             CADENCES        double-leading-tone (ficta, a limma 256:243 below)
  *                             resolving onto the open 5th + octave.
+ *   TEXT    : each tenor note carries one syllable of the chant text; all voices
+ *             sing that syllable's vowel and the tenor articulates its consonants
+ *             (vocal-voices' ecclesiastical-Latin consonant articulator) at each
+ *             syllable change — sparse, as the sources demand: melismas flow on
+ *             the vowel until the tenor moves.
  *   REPERTOIRE: real tenors from the Magnus liber — the "Viderunt omnes" and
  *             "Sederunt principes" gradual responds and an Easter "Alleluia"
  *             (chant pitches decoded from GregoBase gabc) — cycled per start().
@@ -113,6 +118,17 @@ class OrganumEngine {
                 // runt(A·C), "o-" melisma C D C A C C C E D C, "-mnes"(C), then the
                 // respond's closing "terra" melisma cadencing home to F.
                 name: 'Viderunt omnes', ratios: RB_FLAT,
+                // Chant TEXT, one entry per tenor note (each tenor note IS one held
+                // syllable). Split syllables carry their onset consonants on their
+                // first note and their coda on their last; bare vowels = melisma.
+                syls: [
+                    'Vi', 'de', 'ru', 'unt',                                    // Vi–de–runt (runt spans A·C)
+                    'o', 'o', 'o', 'o', 'o', 'o', 'o', 'o', 'o', 'o',           // "o-" clausula
+                    'mnes',                                                     // -mnes
+                    'fi', 'i', 'ne', 'es', 'te', 'er', 'rae', 'e',              // fines terrae…
+                    'sa', 'a', 'lu', 'u', 'ta', 'a', 're', 'e', 'De', 'e',      // …salutare De-
+                    'i'                                                         // -i (final F)
+                ],
                 sections: [
                     { style: 'purum',   uppers: 2, notes: [P(0, 26), P(0, 20), P(2, 20), P(4, 20)] },  // Vi–de–runt
                     { style: 'discant', uppers: 2, notes: D([4, 5, 4, 2, 4, 4, 4, 6, 5, 4], 2) },      // "o-" clausula
@@ -127,6 +143,16 @@ class OrganumEngine {
                 // long D opening — Se(D·F·F) — then the "principes" melismas and the
                 // respond's closing melisma cadencing to F.
                 name: 'Sederunt principes', ratios: RB_FLAT,
+                syls: [
+                    'Se', 'de', 'ru',                                           // Se–de–ru(nt) (the D wall)
+                    'u', 'u', 'u', 'u', 'u', 'unt',                             // -runt melisma, coda closing it
+                    'pri',                                                      // prin-
+                    'i', 'i', 'i', 'i', 'i', 'i', 'i', 'i', 'i', 'i', 'i', 'i', 'in',  // prin- melisma
+                    'ci', 'pes',                                                // -ci-pes
+                    'e', 'et', 'a', 'ad', 've', 'er', 'su', 'u', 'um',          // et adversum
+                    'me', 'e', 'lo', 'o', 'que', 'e', 'e', 'ba', 'a', 'an', 'tu', 'u', 'u', 'u',  // me loquebantu(r)
+                    'ur'                                                        // -(tu)r (final F)
+                ],
                 sections: [
                     { style: 'purum',   uppers: 2, notes: [P(-2, 30), P(0, 20), P(0, 20)] },           // Se–de–runt (the D wall)
                     { style: 'discant', uppers: 2, notes: D([2, 1, 2, 0, 1, 0], 2) },
@@ -143,6 +169,15 @@ class OrganumEngine {
                 // clausula. Ends on G; sung with the tetrardus B♮ gamut. (Léonin's own
                 // Easter Alleluia was "Pascha nostrum"; this is a real sibling melody.)
                 name: 'Alleluia (V. Haec dies)', ratios: RB_NAT,
+                syls: [
+                    'A', 'al', 'le',                                            // Al-le (F G A)
+                    'e', 'e', 'e', 'e', 'e', 'e',                               // -le- clausula
+                    'lu',                                                       // -lú-
+                    'ja', 'a', 'a', 'a', 'a',                                   // -ia (Latin i = [j])
+                    'a',                                                        // …ia → G
+                    'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a',  // jubilus
+                    'a'                                                         // final G
+                ],
                 sections: [
                     { style: 'purum',   uppers: 1, notes: [P(0, 22), P(1, 22), P(2, 20)] },            // Al-(le): F G A
                     { style: 'discant', uppers: 1, notes: D([2, 1, 2, 3, 4, 3], 2) },                  // -le-
@@ -215,6 +250,19 @@ class OrganumEngine {
         const idx = ((deg % 7) + 7) % 7;
         const oct = Math.floor(deg / 7);
         return this.basePitch * this.ratios[idx] * Math.pow(2, oct);
+    }
+
+    /** The sung vowel of a Latin syllable, mapped to the nearest bank vowel a/e/i/o/u. */
+    sylVowel(text) {
+        const s = (text || '').toLowerCase().replace(/ae|oe/g, 'e');   // Latin æ/œ sing as e
+        for (let i = 0; i < s.length; i++) {
+            const c = s[i];
+            if ('aeiou'.includes(c)) {
+                if (c === 'u' && s[i - 1] === 'q') continue;           // "qu" = [kw], not the vowel
+                return c;
+            }
+        }
+        return 'a';
     }
 
     /**
@@ -291,10 +339,12 @@ class OrganumEngine {
         const piece = this.pieces[Math.max(0, this.pieceIndex)];
         this.ratios = piece.ratios;
         this.cantus = [];
+        const syls = piece.syls || [];
+        let sylIdx = 0;
         piece.sections.forEach((sec) => {
             sec.notes.forEach((n, i) => this.cantus.push({
                 deg: n.deg, perf: n.perf, style: sec.style, uppers: sec.uppers,
-                first: i === 0, idx: i, cadTo: null
+                first: i === 0, idx: i, syl: syls[sylIdx++] || null, cadTo: null
             }));
         });
         for (let i = 0; i < this.cantus.length - 1; i++) {
@@ -325,6 +375,24 @@ class OrganumEngine {
         const perfDur = 60 / this.tempo;                 // one perfection (3 tempora)
         const dur = item.perf * perfDur;
         const tenorFreq = this.degToFreq(item.deg);      // the real chant pitch, sung low
+
+        // ── The chant TEXT: each tenor note IS one held syllable. Everyone sings
+        // that syllable's vowel (tenor drone and upper-voice melismas alike), and
+        // the tenor pronounces its consonants ONCE at the syllable change — onset
+        // ending as the vowel opens, coda at the tenor note's end.
+        if (item.syl) {
+            const vowel = this.sylVowel(item.syl);
+            const now = this.ctx.currentTime;
+            for (const v of this.voices) {
+                v.vowel = vowel;
+                v.singers.forEach((s) => { if (s.setVowel) s.setVowel(vowel, now); });
+            }
+            const lead = this.voices[0] && this.voices[0].singers[0];
+            if (lead && lead.articulate) lead.articulate(item.syl, now + 0.1, now + dur, tenorFreq);
+            // A section opening is a real re-entry: the duplum pronounces it too.
+            const dup = item.first && this.voices[1] && this.voices[1].singers[0];
+            if (dup && dup.articulate) dup.articulate(item.syl, now + 0.1, now + dur, tenorFreq * 2);
+        }
 
         // The tenor: a huge sustained drone (purum) or a measured note (discant).
         if (this.voices[0]) this.playVoiceNote(this.voices[0], tenorFreq, dur, 0, { sustained: item.style === 'purum' });
