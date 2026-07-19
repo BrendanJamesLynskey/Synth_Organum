@@ -292,7 +292,8 @@ class OrganumEngine {
             const voice = VocalVoices.create(this.ctx, {
                 technique: this.technique,
                 voice: role === 'tenor' ? 'male' : 'auto',   // tenor dark & low; upper voices may cross F♯4
-                ensemble: 1,                                  // narrow band; app layers 3 detuned singers
+                ensemble: role === 'tenor' ? 3 : 2,           // a few detuned singers per part — decorrelates the
+                                                              // sample loop so long held notes don't sound stitched
                 vowel, detuneCents: cents,
                 breath: role === 'tenor' ? 0.05 : 0.07,
                 vibDepth: (role === 'tenor' ? 0.005 : 0.007) + di * 0.001
