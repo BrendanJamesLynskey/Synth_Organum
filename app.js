@@ -53,25 +53,6 @@ function setVoices(count) {
     engine.setVoices(count);
 }
 
-const ENGINE_BLURBS = {
-    vocoder: 'Channel vocoder — buzz + hiss split through a band-pass bank gated by the vowel envelope (Dudley\'s VODER, 1939).',
-    formant: 'Formant filter — a glottal-pulse oscillator through parallel resonant band-pass formants (source–filter, PAT/OVE).',
-    klatt: 'Klatt cascade — a voicing source + aspiration through a cascade of formant resonators (KLSYN / DECtalk, 1980).',
-    tract: 'Vocal tract — a Kelly–Lochbaum digital waveguide of the vocal tract, excited by a glottal pulse (physical model, 1962).',
-    lpc: 'LPC (all-pole) — a bright impulse/noise excitation through an all-pole resonator bank (Speak & Spell, 1978).',
-    fof: 'FOF — overlapping formant grains, one burst per glottal pulse (IRCAM CHANT, 1979).',
-    additive: 'Additive / SMS — a sum of harmonics tracing the vowel formant envelope (sinusoidal / spectral modelling, 1986).',
-    ddsp: 'DDSP — a harmonic oscillator bank summed with formant-shaped filtered noise, the neural bridge (Engel et al., 2020).'
-};
-
-function setEngine(id) {
-    document.querySelectorAll('.engine-btn').forEach(b => b.classList.remove('active'));
-    document.querySelector(`.engine-btn[data-engine="${id}"]`).classList.add('active');
-    const blurb = document.getElementById('engineBlurb');
-    if (blurb) blurb.textContent = ENGINE_BLURBS[id] || '';
-    engine.setTechnique(id);
-}
-
 function updateTenor() { engine.setTenorVolume(document.getElementById('tenorVol').value / 100); }
 function updateUpper() { engine.setUpperVolume(document.getElementById('upperVol').value / 100); }
 function updateReverb() { engine.setReverbMix(document.getElementById('reverbMix').value / 100); }
