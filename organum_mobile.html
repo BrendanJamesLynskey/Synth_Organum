@@ -2391,10 +2391,12 @@ class OrganumEngine {
         g.setValueAtTime(peak * 0.92, t0 + Math.max(attack, duration * 0.62));
         g.exponentialRampToValueAtTime(0.0008, t0 + duration + release);
 
-        const glide = (opts.slideFrom && opts.legato) ? Math.min(0.13, duration * 0.4) : 0;
+        // Discrete pitch per note — NO portamento. Medieval vocal polyphony moves
+        // by clean steps; an audible glide between notes sounds artificial. (The
+        // sampler's segment crossfade still makes the change click-free.) Legato
+        // stays connected via the softer attack above, not a pitch slide.
         voice.singers.forEach(s => {
-            if (glide > 0 && isFinite(opts.slideFrom)) s.setFrequency(opts.slideFrom, t0, 0), s.setFrequency(freq, t0, glide);
-            else s.setFrequency(freq, t0, 0);
+            s.setFrequency(freq, t0, 0);
             s.setLevel(1, t0);
         });
     }
