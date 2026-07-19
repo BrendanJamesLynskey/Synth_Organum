@@ -2,7 +2,7 @@
 
 A web-based synthesizer that sings **Notre-Dame organum** in real time in the browser. Organum was *sung*, so every voice is now a **real recorded human voice**: the shared [`vocal-voices.js`](vocal-voices.js) library plays actual sung vowels from the [**VocalSet**](https://zenodo.org/records/1193957) corpus (CC BY 4.0), pitch-mapped with **formant-preserving** TD-PSOLA and tuned in pure **Pythagorean just intonation**.
 
-By default it plays the **real notated works of the Notre-Dame school**, note-for-note across every voice — Pérotin's *Viderunt omnes* and *Sederunt principes* (the great four-voice *organa quadrupla*), the *Alleluia Nativitas* (opening section), and the *Beata viscera* conductus — transcribed from published editions (see [`organum-scores.js`](organum-scores.js) for the encodings and sources). A **Composition** selector switches between them, and a **Playback** toggle offers an alternative **Improvised** mode that generates organum from the rhythmic modes and Pérotin's melodic figures over a real chant tenor.
+By default it plays the **real notated works of the Notre-Dame school**, note-for-note across every voice: Pérotin's *Viderunt omnes* and *Sederunt principes* (the great four-voice *organa quadrupla*), his *Alleluia Nativitas* (opening) and *Beata viscera* conductus, **Léonin's *Viderunt omnes* and *Haec dies* organa dupla** (from the *Magnus liber organi* — the two-voice foil to Pérotin's setting of the same chant), and the anonymous *Orientis partibus* conductus — transcribed from published editions (see [`organum-scores.js`](organum-scores.js) for the encodings and per-work sources). A **Composition** selector switches between them, and a **Playback** toggle offers an alternative **Improvised** mode that generates organum from the rhythmic modes and Pérotin's melodic figures over a real chant tenor.
 
 > **Credit:** sampled voices derived from [**VocalSet**](https://zenodo.org/records/1193957) (Wilkins, Seetharaman, Wahl & Pardo, ISMIR 2018), CC BY 4.0.
 
@@ -75,7 +75,7 @@ Open <http://localhost:8080> and press **Begin Organum**. Any static file server
 | Control | Description |
 |---|---|
 | **Playback** | **Score** (default) — a real notated work played note-for-note — or **Improvised** — the generative modal engine |
-| **Composition** | Choose the score: Pérotin's *Viderunt omnes*, *Sederunt principes*, *Alleluia Nativitas*, or *Beata viscera* |
+| **Composition** | Choose the score: Pérotin's *Viderunt omnes* / *Sederunt principes* / *Alleluia Nativitas* / *Beata viscera*, or Léonin's *Viderunt omnes* / *Haec dies* dupla, or *Orientis partibus* |
 | **Mode** | *(Improvised mode)* One of the 8 church tones (Dorian → Hypomixolydian) — sets the finalis and reciting tenor |
 | **Rhythmic Mode** | *(Improvised mode)* One of the 6 medieval rhythmic modes (long–short patterns) the upper voices follow |
 | **Tenor** | Volume of the sustained cantus-firmus voice |
