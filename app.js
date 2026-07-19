@@ -35,6 +35,25 @@ async function toggleChant() {
 
 // === Controls ===
 
+/** Score (real notated works, the default) ⇄ Improvised (the generative engine). */
+function setPlayback(mode) {
+    document.querySelectorAll('.pb-btn').forEach(b => b.classList.toggle('active', b.dataset.pb === mode));
+    updateModeDimming(mode);
+    engine.setPlaybackMode(mode);
+}
+
+function setScore(index) {
+    document.querySelectorAll('.score-btn').forEach(b => b.classList.toggle('active', parseInt(b.dataset.score) === index));
+    engine.setScore(index);
+}
+
+/** Grey out whichever control groups belong to the inactive playback mode. */
+function updateModeDimming(mode) {
+    document.querySelectorAll('.control-group.improv-only').forEach(g => g.classList.toggle('dimmed', mode === 'score'));
+    const sg = document.getElementById('scoreGroup');
+    if (sg) sg.classList.toggle('dimmed', mode !== 'score');
+}
+
 function setMode(mode) {
     document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
     document.querySelector(`.mode-btn[data-mode="${mode}"]`).classList.add('active');
@@ -159,6 +178,7 @@ function startMotes() {
 window.addEventListener('resize', () => { if (isChanting) { stopVisualization(); startVisualization(); } });
 
 window.addEventListener('DOMContentLoaded', () => {
+    updateModeDimming(engine.playbackMode);          // score mode is the default
     const canvas = document.getElementById('vizCanvas');
     const ctx = canvas.getContext('2d');
     canvas.width = canvas.offsetWidth * window.devicePixelRatio;

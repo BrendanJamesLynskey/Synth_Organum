@@ -8,6 +8,28 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=UnifrakturMaguntia&family=Cinzel:wght@400;600;700&family=EB+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
+    <style>
+        /* Controls that belong to the other playback mode fall into shadow */
+        .control-group.dimmed { opacity: 0.35; pointer-events: none; }
+        .control-group { transition: opacity 0.4s; }
+        /* Playback-mode & composition buttons — same dress as the mode buttons */
+        .pb-btn, .score-btn {
+            font-family: 'Cinzel', serif;
+            font-size: 0.82rem;
+            color: var(--text-dim);
+            background: rgba(20, 30, 60, 0.6);
+            border: 1px solid var(--panel-line);
+            border-radius: 6px;
+            padding: 0.5rem 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            min-width: 46px;
+            text-align: center;
+        }
+        .pb-btn:hover, .score-btn:hover { background: rgba(63, 111, 208, 0.14); border-color: var(--gold-dark); }
+        .pb-btn.active, .score-btn.active { color: var(--gold-bright); background: rgba(63, 111, 208, 0.22); border-color: var(--gold); box-shadow: 0 0 10px rgba(63, 111, 208, 0.25); }
+        .pb-btn small, .score-btn small { display: block; font-size: 0.62rem; letter-spacing: 0.03em; opacity: 0.75; margin-top: 2px; }
+    </style>
 </head>
 <body>
     <div class="icon-border-top"></div>
@@ -65,8 +87,28 @@
                 </button>
             </div>
 
-            <!-- Church tones -->
+            <!-- Playback: the real notated works (default) or the improvising engine -->
             <div class="control-group">
+                <label class="control-label">&#x2726; Playback</label>
+                <div class="mode-selector">
+                    <button class="pb-btn active" data-pb="score" onclick="setPlayback('score')">Score<small>Notated works</small></button>
+                    <button class="pb-btn" data-pb="improv" onclick="setPlayback('improv')">Improvised<small>Modal engine</small></button>
+                </div>
+            </div>
+
+            <!-- The composition (score playback) -->
+            <div class="control-group" id="scoreGroup">
+                <label class="control-label">&#x2726; Composition</label>
+                <div class="mode-selector">
+                    <button class="score-btn active" data-score="0" onclick="setScore(0)">Viderunt omnes<small>P&eacute;rotin &#183; 4vv</small></button>
+                    <button class="score-btn" data-score="1" onclick="setScore(1)">Sederunt principes<small>P&eacute;rotin &#183; 4vv</small></button>
+                    <button class="score-btn" data-score="2" onclick="setScore(2)">Alleluia Nativitas<small>P&eacute;rotin &#183; 3vv</small></button>
+                    <button class="score-btn" data-score="3" onclick="setScore(3)">Beata viscera<small>P&eacute;rotin &#183; conductus</small></button>
+                </div>
+            </div>
+
+            <!-- Church tones -->
+            <div class="control-group improv-only">
                 <label class="control-label">&#x2726; Mode (Church Tone)</label>
                 <div class="mode-selector">
                     <button class="mode-btn active" data-mode="1" onclick="setMode(1)">I<small>Dorian</small></button>
@@ -81,7 +123,7 @@
             </div>
 
             <!-- Rhythmic modes (the upper voices follow these long–short patterns) -->
-            <div class="control-group">
+            <div class="control-group improv-only">
                 <label class="control-label">&#x2726; Rhythmic Mode</label>
                 <div class="mode-selector">
                     <button class="rhythm-btn active" data-rhythm="1" onclick="setRhythm(1)">I<small>L&ndash;S</small></button>
@@ -100,7 +142,7 @@
                 <div class="control-group"><label class="control-label">&#x2726; Pace</label><input type="range" class="slider" id="tempoSlider" min="30" max="72" value="46" oninput="updateTempo()"></div>
             </div>
 
-            <div class="control-group">
+            <div class="control-group improv-only">
                 <label class="control-label">&#x2726; Voices</label>
                 <div class="mode-selector">
                     <button class="choir-btn active" data-voices="2" onclick="setVoices(2)">Duplum &#183; L&eacute;onin</button>
@@ -146,9 +188,11 @@
         <p>Viderunt omnes fines terrae</p>
         <p class="latin">All the ends of the earth have seen</p>
             <p style="font-size:0.72rem;opacity:0.55;margin-top:0.6rem;">Voices derived from <a href="https://zenodo.org/records/1193957" style="color:inherit;">VocalSet</a> (Wilkins et al. 2018) &middot; CC BY 4.0</p>
+            <p style="font-size:0.72rem;opacity:0.55;margin-top:0.3rem;">Scores decoded from editions at <a href="https://www.cpdl.org/wiki/index.php/Graduale_%27Viderunt_omnes%27_(P%C3%A9rotin)" style="color:inherit;">CPDL</a> (ed. Sirius Chapp, Tristan Meares) and <a href="https://www.cpdl.org/wiki/index.php/Alleluia:_Nativitas_(P%C3%A9rotin)" style="color:inherit;">St Cecilia Press</a></p>
     </footer>
 
     <script src="vocal-voices.js"></script>
+    <script src="organum-scores.js"></script>
     <script src="organum-engine.js"></script>
     <script src="app.js"></script>
 </body>

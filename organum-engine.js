@@ -38,6 +38,18 @@
  *             "Sederunt principes" gradual responds and an Easter "Alleluia"
  *             (chant pitches decoded from GregoBase gabc) — cycled per start().
  *
+ * PLAYBACK MODES:
+ *   SCORE (default) — REAL Notre-Dame works played back note-for-note from
+ *             organum-scores.js (Pérotin's Viderunt omnes & Sederunt principes
+ *             quadrupla complete, the Alleluia Nativitas triplum, and the
+ *             Beata viscera conductus, decoded from CPDL / St Cecilia Press
+ *             MusicXML & MIDI editions). Every voice of the transcription gets
+ *             its own sampler part; pitches are re-tuned to pure Pythagorean
+ *             ratios anchored on the piece's final, and the tenor pronounces
+ *             its chant syllable at each tenor-note onset.
+ *   IMPROV  — the generative engine described above (modal ordines + Pérotin
+ *             figure vocabulary over a real chant tenor).
+ *
  * Plus the 8 church tones, the 6 rhythmic modes, and a ~7 s cathedral reverb.
  */
 
@@ -194,6 +206,18 @@ class OrganumEngine {
         this.cantus = [];
         this.cantusPos = 0;
         this.nextOpen = null;           // pending cadence resolutions for the upper voices
+
+        // ── SCORE-PLAYBACK mode (the default): real notated works ──
+        this.playbackMode = 'score';    // 'score' | 'improv'
+        this.scoreIndex = 0;            // default work: Viderunt omnes
+        this.score = null;              // active timeline {data, parts, t0, spb, endBeat}
+        this.scoreTimer = null;
+        this.pendingRestart = null;
+        this.scoreRate = 1;             // pace-slider multiplier (slider 46 = 1.0)
+        // Full Pythagorean chromatic ratios (chain of pure 3:2 fifths), indexed by
+        // semitones above the piece's final — so cadential 5ths/8ves are beatless.
+        this.pyth12 = [1/1, 256/243, 9/8, 32/27, 81/64, 4/3, 729/512,
+                       3/2, 128/81, 27/16, 16/9, 243/128];
     }
 
     async init() {
@@ -271,14 +295,16 @@ class OrganumEngine {
      * The tenor stays on the male sample bank (G2–F♯4); the upper voices use 'auto'
      * so notes above F♯4 pick the treble bank — everything stays within G2–F♯5.
      */
-    createVoice(index) {
+    createVoice(index, roleOverride) {
         const now = this.ctx.currentTime;
-        const role = index === 0 ? 'tenor' : 'upper';
-        const bus = role === 'tenor' ? this.tenorBus : this.upperBus;
+        // 'solo' = a single-voice score part (conductus): tenor bus & weight, but the
+        // 'auto' bank so a melody crossing F♯4 picks the treble samples per note.
+        const role = roleOverride || (index === 0 ? 'tenor' : 'upper');
+        const bus = role === 'upper' ? this.upperBus : this.tenorBus;
         const vowel = this.voiceVowels[Math.min(index, this.voiceVowels.length - 1)];
 
         const voiceGain = this.ctx.createGain();
-        const perVoice = role === 'tenor' ? 0.9 : [0.62, 0.52, 0.46][Math.min(index - 1, 2)];
+        const perVoice = role === 'upper' ? [0.62, 0.52, 0.46][Math.min(Math.max(index - 1, 0), 2)] : 0.9;
         voiceGain.gain.setValueAtTime(0, now);
         voiceGain.gain.linearRampToValueAtTime(perVoice, now + 1.4 + index * 0.5);
         voiceGain.connect(bus);
@@ -358,6 +384,7 @@ class OrganumEngine {
 
     start() {
         this.isPlaying = true;
+        if (this.playbackMode === 'score') { this.startScore(); return; }
         this.pieceIndex = (this.pieceIndex + 1) % this.pieces.length;   // cycle the repertoire
         this.buildCantus();
         this.scheduleTenorNote();
@@ -366,9 +393,143 @@ class OrganumEngine {
     stop() {
         this.isPlaying = false;
         if (this.cantusTimeout) { clearTimeout(this.cantusTimeout); this.cantusTimeout = null; }
+        if (this.scoreTimer) { clearTimeout(this.scoreTimer); this.scoreTimer = null; }
+        if (this.pendingRestart) { clearTimeout(this.pendingRestart); this.pendingRestart = null; }
+        this.score = null;
         this.nextOpen = null;
         this.teardownVoices();
     }
+
+    // === SCORE PLAYBACK — real notated Notre-Dame works, note for note ===
+
+    /** Pythagorean pitch: pure-fifth chromatic ratios anchored on the piece's final. */
+    scoreFreq(midi, rootMidi) {
+        const rootHz = 440 * Math.pow(2, (rootMidi - 69) / 12);
+        const d = midi - rootMidi;
+        const idx = ((d % 12) + 12) % 12;
+        const oct = Math.floor((d - idx) / 12);
+        return rootHz * this.pyth12[idx] * Math.pow(2, oct);
+    }
+
+    /**
+     * Flatten one work of organum-scores.js into per-part event timelines.
+     * Each voice's notes are [midi, durBeats(, syllable)]; midi 0 = rest. Ties are
+     * pre-merged in the data, so a single event can be an enormous organum-purum
+     * tenor drone. legato marks notes butted against their predecessor (melisma
+     * motion — sung with a small glide, no re-attack).
+     */
+    buildScoreTimeline() {
+        const list = (typeof ORGANUM_SCORES !== 'undefined') ? ORGANUM_SCORES : [];
+        const data = list[this.scoreIndex] || list[0];
+        if (!data) return null;
+        // Tenor (or the conductus solo) first: index 0 gets the male bank + tenor bus.
+        const lower = data.voices.filter(v => v.role === 'tenor' || v.role === 'solo');
+        const upper = data.voices.filter(v => v.role !== 'tenor' && v.role !== 'solo');
+        const ordered = lower.concat(upper);
+        let endBeat = 0;
+        const parts = ordered.map((v) => {
+            const events = [];
+            let t = 0, prevEnd = -1, prevMidi = null;
+            for (const n of v.notes) {
+                const midi = n[0], dur = n[1];
+                if (midi === 0) { t += dur; continue; }        // rest
+                const legato = Math.abs(t - prevEnd) < 1e-6;
+                events.push({ beat: t, dur, midi, syl: n[2] || null, legato, prevMidi });
+                prevEnd = t + dur; prevMidi = midi; t = prevEnd;
+            }
+            endBeat = Math.max(endBeat, t);
+            return { role: v.role, events, ptr: 0 };
+        });
+        return { data, parts, endBeat, t0: 0, spb: 0 };
+    }
+
+    startScore() {
+        const score = this.buildScoreTimeline();
+        if (!score) { this.isPlaying = false; return; }
+        this.score = score;
+        // One sampler part per score voice (up to 4 for the quadrupla).
+        this.teardownVoices();
+        score.parts.forEach((p, i) => {
+            const role = p.role === 'tenor' ? 'tenor' : (p.role === 'solo' ? 'solo' : 'upper');
+            this.voices.push(this.createVoice(i, role));
+        });
+        score.spb = 60 / (score.data.tempo * this.scoreRate);   // seconds per notated beat
+        score.t0 = this.ctx.currentTime + 1.4;                  // let the part gains fade in
+        this.scorePump();
+    }
+
+    /** Look-ahead pump: every 400 ms schedule all events due in the next ~2.2 s. */
+    scorePump() {
+        if (!this.isPlaying || !this.score || !this.voices.length) return;
+        const s = this.score;
+        const now = this.ctx.currentTime;
+        const horizon = now + 2.2;
+        s.parts.forEach((part, pi) => {
+            const voice = this.voices[pi];
+            if (!voice) return;
+            while (part.ptr < part.events.length) {
+                const ev = part.events[part.ptr];
+                const tAbs = s.t0 + ev.beat * s.spb;
+                if (tAbs > horizon) break;
+                const durSec = ev.dur * s.spb;
+                const freq = this.scoreFreq(ev.midi, s.data.rootMidi);
+                if (ev.syl) {
+                    // The chant text: at a tenor (or solo) syllable everyone takes its
+                    // vowel and the carrying voice articulates the consonants once.
+                    const vowel = this.sylVowel(ev.syl);
+                    const tv = Math.max(now, tAbs);
+                    const targets = pi === 0 ? this.voices : [voice];
+                    for (const v of targets) {
+                        v.vowel = vowel;
+                        v.singers.forEach(sg => { if (sg.setVowel) sg.setVowel(vowel, tv); });
+                    }
+                    const lead = voice.singers[0];
+                    if (lead && lead.articulate) lead.articulate(ev.syl, tv + 0.08, tAbs + durSec, freq);
+                }
+                this.playVoiceNote(voice, freq, durSec, tAbs - now, {
+                    sustained: durSec > 2.5,                    // organum-purum drones breathe in slowly
+                    legato: ev.legato,
+                    slideFrom: (ev.legato && ev.prevMidi) ? this.scoreFreq(ev.prevMidi, s.data.rootMidi) : null
+                });
+                part.ptr++;
+            }
+        });
+        // At the end of the work, breathe, then let it sound again from the top.
+        if (s.parts.every(p => p.ptr >= p.events.length)) {
+            const endAbs = s.t0 + s.endBeat * s.spb;
+            if (now > endAbs + 1.5) {
+                s.parts.forEach(p => { p.ptr = 0; });
+                s.t0 = now + 4;
+            }
+        }
+        this.scoreTimer = setTimeout(() => this.scorePump(), 400);
+    }
+
+    /** Stop and come back in cleanly (mode toggles, piece changes, technique swaps). */
+    restartPlayback() {
+        if (!this.isPlaying) return;
+        this.stop();                                   // also cancels any pending restart
+        this.pendingRestart = setTimeout(() => {
+            this.pendingRestart = null;
+            if (this.isPlaying) return;
+            this.isPlaying = true;
+            if (this.playbackMode === 'score') this.startScore();
+            else { this.setupVoices(); this.pieceIndex = (this.pieceIndex + 1) % this.pieces.length; this.buildCantus(); this.scheduleTenorNote(); }
+        }, 700);
+    }
+
+    setPlaybackMode(mode) {
+        if (mode === this.playbackMode) return;
+        this.playbackMode = mode;
+        this.restartPlayback();
+    }
+
+    setScore(index) {
+        this.scoreIndex = index;
+        if (this.playbackMode === 'score') this.restartPlayback();
+    }
+
+    // === Generative (improvised) scheduling ===
 
     scheduleTenorNote() {
         if (!this.isPlaying || !this.voices.length) return;
@@ -597,19 +758,29 @@ class OrganumEngine {
     async begin() {
         await this.init();
         if (this.ctx.state === 'suspended') await this.ctx.resume();
+        if (this.playbackMode === 'score') {
+            // startScore builds one voice per score part itself.
+            setTimeout(() => { if (!this.isPlaying) this.start(); }, 300);
+            return;
+        }
         this.setupVoices();
         setTimeout(() => { if (!this.isPlaying) this.start(); }, 1300);
     }
 
     end() { this.stop(); }
 
-    setMode(mode) { this.currentMode = mode; if (this.isPlaying) this.buildCantus(); }
+    setMode(mode) { this.currentMode = mode; if (this.isPlaying && this.playbackMode !== 'score') this.buildCantus(); }
     setRhythm(mode) { this.rhythmicMode = mode; }
-    setVoices(count) { this.numVoices = count; if (this.voices.length) this.setupVoices(); }
+    setVoices(count) {
+        this.numVoices = count;
+        if (this.playbackMode === 'score') return;   // score voices come from the work itself
+        if (this.voices.length) this.setupVoices();
+    }
 
     /** Switch the vocal-synthesis technique live ('vocoder'|'formant'|'klatt'|'tract'|'lpc'|'fof'|'additive'|'ddsp'). */
     setTechnique(t) {
         this.technique = t;
+        if (this.playbackMode === 'score') { if (this.isPlaying) this.restartPlayback(); return; }
         if (this.voices.length) this.setupVoices();
     }
 
@@ -623,7 +794,19 @@ class OrganumEngine {
             this.dryGain.gain.linearRampToValueAtTime(1 - v * 0.5, now + 0.2);
         }
     }
-    setTempo(bpm) { this.tempo = bpm; }
+    setTempo(bpm) {
+        this.tempo = bpm;
+        // The Pace slider (30–72, default 46) scales the score's own tempo; re-anchor
+        // the timeline so the current beat keeps its place at the new rate.
+        this.scoreRate = bpm / 46;
+        if (this.playbackMode === 'score' && this.isPlaying && this.score && this.ctx) {
+            const s = this.score;
+            const now = this.ctx.currentTime;
+            const newSpb = 60 / (s.data.tempo * this.scoreRate);
+            s.t0 = now - ((now - s.t0) / s.spb) * newSpb;
+            s.spb = newSpb;
+        }
+    }
 
     getAnalyserData() { if (!this.analyser) return null; const d = new Uint8Array(this.analyser.frequencyBinCount); this.analyser.getByteTimeDomainData(d); return d; }
     getFrequencyData() { if (!this.analyser) return null; const d = new Uint8Array(this.analyser.frequencyBinCount); this.analyser.getByteFrequencyData(d); return d; }
