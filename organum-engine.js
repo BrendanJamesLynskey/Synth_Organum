@@ -62,8 +62,8 @@ class OrganumEngine {
         this.numVoices = 3;             // tenor + duplum + triplum (the Pérotin sound)
         this.tempo = 88;                // perfections (dotted-quarter beats) per minute
         this.technique = 'sampler';   // real recorded voices (was 'fof')
-        this.tenorVolume = 0.85;
-        this.upperVolume = 0.7;
+        this.tenorVolume = 0.55;        // the tenor is a sustaining drone — sits UNDER the upper voices
+        this.upperVolume = 0.95;        // the florid upper voices carry the music and must be clearly on top
         this.reverbMix = 0.62;
 
         this.voices = [];
@@ -304,7 +304,7 @@ class OrganumEngine {
         const vowel = this.voiceVowels[Math.min(index, this.voiceVowels.length - 1)];
 
         const voiceGain = this.ctx.createGain();
-        const perVoice = role === 'upper' ? [0.62, 0.52, 0.46][Math.min(Math.max(index - 1, 0), 2)] : 0.9;
+        const perVoice = role === 'upper' ? [0.9, 0.84, 0.78][Math.min(Math.max(index - 1, 0), 2)] : 0.9;
         voiceGain.gain.setValueAtTime(0, now);
         voiceGain.gain.linearRampToValueAtTime(perVoice, now + 1.4 + index * 0.5);
         voiceGain.connect(bus);
