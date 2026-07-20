@@ -18,7 +18,7 @@ The two great masters were **Léonin**, of the two-voice *organum purum*, and **
 
 ## How it sounds high quality
 
-Rather than equal-tempered tones, the engine builds every pitch and timbre from first principles:
+Rather than equal-tempered tones, the engine tunes every pitch from first principles and sings it with a real voice:
 
 - **Tuning** — pure **Pythagorean just intonation**: pitches are stacked 3:2 fifths reduced into the octave (`1/1, 9/8, 81/64, 4/3, 3/2, 27/16, 243/128, 2/1`). The octave (2/1), fifth (3/2), fourth (4/3) and twelfth (3/1) are *exact*, so the consonances at every cadence are **beatless** — the voices lock and the stone rings.
 - **Voice** — **real recorded singing**, not synthesis: actual sung vowels from the **VocalSet** corpus, sustained by a phase-coherent **splice sampler** and pitch-mapped **formant-preservingly** across the range — each note plays the nearest recorded pitch, detuned by at most about a semitone, so the formants stay put as the pitch moves and a low tenor note still sounds like a voice and not a chipmunk. Each part is a small **chorus** of the sampled voice, slightly detuned and panned with independent vibrato and breath; the centre singer of each part stays exactly in tune so the inter-voice consonances remain beatless. Syllable onsets are articulated with procedural **consonants** (sibilants, plosives, nasals) so the chant text is pronounced, while the melismas flow on the vowel.
@@ -42,11 +42,11 @@ A parallel, secular, vernacular branch runs alongside it: **Troubadour** song.
 
 | App | Style | Voice |
 |---|---|---|
-| [Synth Gregorian](https://github.com/BrendanJamesLynskey/Synth_Gregorian) | Plainsong | Real sampled voices, straight-tone chant |
+| [Synth Gregorian](https://github.com/BrendanJamesLynskey/Synth_Gregorian) | Plainsong | Ethereal sine tones by default; optional real sampled voices, straight-tone chant |
 | **Synth Organum** (this) | Notre-Dame polyphony | Real sampled voices in Pythagorean just intonation |
 | [Synth Troubadour](https://github.com/BrendanJamesLynskey/Synth_Troubadour) | Secular monophony | Real sampled voice over a subtractive vielle drone |
 
-The shared sampled voice at the heart of all three is explored in depth — alongside a century of pure-synthesis techniques — in [Vocal Synthesis](https://github.com/BrendanJamesLynskey/Vocal_Synthesis).
+The shared sampled voice that sings this app, Troubadour and Gregorian's optional **Voices** timbre is explored in depth — alongside a century of pure-synthesis techniques — in [Vocal Synthesis](https://github.com/BrendanJamesLynskey/Vocal_Synthesis).
 
 ## Quick start
 
